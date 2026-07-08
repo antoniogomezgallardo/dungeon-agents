@@ -1,0 +1,33 @@
+[project]
+name = "dungeon-agents"
+version = "0.1.0"
+description = "A console fantasy RPG for learning agentic AI patterns, en route to a QA/TestOps AI product."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "openai-agents>=0.18.0",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+dungeon-agents = "dungeon_agents.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+markers = [
+    "llm: tests that require an OpenAI API key and make real model calls (deselect with '-m \"not llm\"')",
+]
+testpaths = ["tests"]
