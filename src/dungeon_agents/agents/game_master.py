@@ -57,7 +57,14 @@ def build_game_master(settings: Settings):
     Imported lazily so that importing this module (e.g. in the smoke test) does
     not require the SDK to be installed or an API key to be present.
     """
-    from agents import Agent
+    from agents import Agent, set_tracing_disabled
+
+    # The SDK's tracing exports run traces to OpenAI's platform and require an
+    # OPENAI_API_KEY. Our default provider is Anthropic, so tracing has nothing
+    # to export and would log a confusing "OPENAI_API_KEY is not set, skipping
+    # trace export" warning every turn. We don't use that dashboard here, so
+    # disable tracing outright for a clean console.
+    set_tracing_disabled(True)
 
     return Agent(
         name="Game Master",
