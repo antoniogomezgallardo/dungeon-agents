@@ -8,6 +8,12 @@ dependencies = [
     # The [litellm] extra pulls in the adapter that lets the OpenAI Agents SDK
     # talk to Anthropic (Claude) and other providers.
     "openai-agents[litellm]>=0.18.0",
+    # Pin: openai 2.37+ made `cache_write_tokens` a required field on
+    # InputTokensDetails, but litellm 1.91.x still builds that object without it,
+    # which raised a pydantic ValidationError on every model call through the
+    # LiteLLM adapter. Capping openai at <2.37 keeps litellm and openai in sync.
+    # Revisit when litellm ships support for the newer openai token schema.
+    "openai>=2.36,<2.37",
     "pydantic>=2.7",
     "python-dotenv>=1.0",
     "rich>=13.7",

@@ -37,23 +37,37 @@ Override the model for either with `DUNGEON_MODEL`. Get an Anthropic key at
 
 ## Setup
 
+A virtual environment keeps the project's dependencies isolated from your
+system Python and from other projects — install the right versions here, and
+they never interfere with anything else.
+
 ```bash
-# 1. (Recommended) create a virtual environment
+# 1. Create a virtual environment
 python -m venv .venv
+
+# 2. Activate it
 # Windows PowerShell:
 .venv\Scripts\Activate.ps1
 # macOS/Linux:
-# source .venv/bin/activate
+source .venv/bin/activate
+```
 
-# 2. Install the project (and its dependencies)
-python -m pip install -e .
+> **Windows PowerShell one-time gotcha:** if activation is blocked, run
+> `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned` once,
+> then try again.
 
-# 3. Configure your API key
+```bash
+# 3. Install the project and all dependencies (including dev tools like pytest)
+pip install -e ".[dev]"
+
+# 4. Configure your API key
 copy .env.example .env      # Windows
 # cp .env.example .env      # macOS/Linux
 # then edit .env: keep DUNGEON_PROVIDER=anthropic and set ANTHROPIC_API_KEY
 # (or set DUNGEON_PROVIDER=openai and OPENAI_API_KEY)
 ```
+
+The `.venv/` directory is listed in `.gitignore` and is never committed.
 
 ## Run
 
@@ -69,15 +83,22 @@ Type an action and press Enter. Type `exit` or `quit` (or press Ctrl+C) to
 leave. Without the API key for your selected provider, the app prints a friendly
 message and exits cleanly instead of crashing.
 
+**First launch takes ~20 seconds** — this is normal. The OpenAI Agents SDK and
+the LiteLLM adapter are heavy to import; the app shows a "Loading the game
+engine…" spinner while they load. Subsequent launches in the same session are
+instant.
+
 ## Tests
 
-Deterministic tests run **without an API key** (and without the SDK installed):
+Deterministic tests run **without an API key** (and without a real model call):
 
 ```bash
-python -m pip install pytest
 python -m pytest -m "not llm"     # deterministic tests only (default in M1)
 python -m pytest                  # everything
 ```
+
+`pytest` is included in the `[dev]` extra installed in the Setup step above —
+no separate install needed.
 
 - **Deterministic tests** (no `llm` marker): imports, config, agent contract.
   These are the CI-safe, reproducible checks.
