@@ -53,6 +53,31 @@ OpenAI Agents SDK (chosen 2026-07-08). **Provider is selectable** via
 Override either default with `DUNGEON_MODEL`. Only `config.py` reads env vars;
 only `game_master.py` touches the SDK/LiteLLM.
 
+**Dependency constraint (2026-07-10):** `openai` is pinned to `>=2.36,<2.37`
+because `openai 2.37+` made `cache_write_tokens` required on
+`InputTokensDetails`, which `litellm 1.91.x` does not set — causing a pydantic
+`ValidationError` on every model call through the LiteLLM adapter. Revisit when
+litellm ships support for the newer token schema.
+
+**First-run startup delay:** the SDK and LiteLLM adapter take ~20 seconds to
+import on first launch. `main.py` shows a `console.status` spinner ("Loading the
+game engine…") during this window so it doesn't look frozen.
+
+## Development environment
+
+Use a virtual environment (`.venv/`). The blessed workflow:
+
+```bash
+python -m venv .venv
+# Windows PowerShell (one-time: Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned)
+.venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+`.venv/` is in `.gitignore` and is never committed. `pytest` comes from the
+`[dev]` extra — no separate install step.
+
 ## Milestone status
 
 - **M1 — Single Game Master agent: DONE.** Console loop, `exit`/`quit`/Ctrl+C

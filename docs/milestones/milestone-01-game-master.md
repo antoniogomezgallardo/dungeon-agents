@@ -251,10 +251,15 @@ Even at this tiny scale, the project already reflects a tester's instincts:
 
 ## 5. How to test / verify it yourself
 
+> **Update (2026-07-10) — use the venv workflow.** The commands below reflect
+> the original M1 approach (manual installs). The current blessed workflow uses
+> a virtual environment and installs everything — including `pytest` — in one
+> step via the `[dev]` extra. See the README Setup section for the canonical
+> commands. The expected test result (`8 passed`) is unchanged.
+
 ```bash
 # Deterministic suite — no API key needed
-python -m pip install pytest python-dotenv pydantic rich
-python -m pip install -e . --no-deps          # install the package itself
+# (from inside an activated .venv with `pip install -e ".[dev]"` already run)
 python -m pytest -m "not llm" -q              # expect: 8 passed
 
 # Verify the safe-failure path (no key set):
@@ -262,9 +267,10 @@ python -m pytest -m "not llm" -q              # expect: 8 passed
 #   (e.g. "No ANTHROPIC_API_KEY found." for the default provider)
 
 # Full run (needs a key):
-python -m pip install -e .                     # pulls the SDK too
 copy .env.example .env                          # then edit .env, add your key
 dungeon-agents                                  # play; type `exit` to quit
+# Note: first launch takes ~20 seconds while the SDK imports. A spinner
+# ("Loading the game engine…") shows during this window — not a hang.
 ```
 
 **Expected smoke-test result:** `8 passed`.
