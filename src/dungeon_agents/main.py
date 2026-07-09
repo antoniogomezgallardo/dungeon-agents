@@ -37,7 +37,8 @@ def run() -> None:
 
     if not settings.has_api_key:
         console.print(
-            "[bold red]No OPENAI_API_KEY found.[/bold red] "
+            f"[bold red]No {settings.api_key_env_name} found.[/bold red] "
+            f"(provider: [cyan]{settings.provider}[/cyan]) "
             "Copy [cyan].env.example[/cyan] to [cyan].env[/cyan] and add your key, "
             "then run again."
         )
@@ -50,7 +51,8 @@ def run() -> None:
 
     console.print(
         Panel(
-            "[bold]Dungeon Agents[/bold] — type an action, or [cyan]exit[/cyan] to quit.",
+            "[bold]Dungeon Agents[/bold] — type an action, or [cyan]exit[/cyan] to quit.\n"
+            f"[dim]{settings.provider} · {settings.model}[/dim]",
             border_style="green",
         )
     )
