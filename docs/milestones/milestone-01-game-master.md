@@ -3,6 +3,18 @@
 > **Status:** ✅ Done
 > **Theme:** Get one agent talking to a human through a clean, testable console loop.
 
+> **Update (2026-07-09) — provider is now selectable.** After M1 shipped, the
+> project was adapted to run on **Anthropic (Claude) by default**, or OpenAI,
+> chosen via `DUNGEON_PROVIDER`. Where this document below says `OPENAI_API_KEY`
+> or `gpt-4o-mini`, read it as *"the selected provider's key / default model."*
+> Concretely: `config.Settings` now carries `provider`, `api_key`, and `model`
+> (not a hard-coded `openai_api_key`); the default is `anthropic` +
+> `claude-haiku-4-5` ($1/$5 per 1M tokens); and Anthropic is reached through the
+> OpenAI Agents SDK's **LiteLLM adapter**. The *design lessons in this doc are
+> unchanged* — this is exactly the "isolate the vendor behind config" payoff the
+> doc argues for, demonstrated in practice. See §2.4 (note below the heading) and the README
+> for the current shape.
+
 ---
 
 ## 1. Goal
@@ -48,9 +60,11 @@ easier. If it's messy, every later milestone inherits the mess.
 ### 2.2 `.env.example` and `.gitignore` — secrets and hygiene
 
 **What:** `.env.example` is a committed template listing the variables the app
-reads (`OPENAI_API_KEY`, `DUNGEON_MODEL`). `.gitignore` ensures the real `.env`
-(with your actual key) is never committed, along with build artifacts and the
-future `data/` directory.
+reads (`OPENAI_API_KEY`, `DUNGEON_MODEL` at M1; updated after M1 to
+`DUNGEON_PROVIDER`, `ANTHROPIC_API_KEY`, and `DUNGEON_MODEL` — see addendum at
+the top of this document). `.gitignore` ensures the real `.env` (with your
+actual key) is never committed, along with build artifacts and the future
+`data/` directory.
 
 **Why it matters:**
 - **Never commit secrets.** The `.example` convention is the standard way to
@@ -95,6 +109,14 @@ class Settings:
 > what a run will do, you read one object.
 
 ### 2.4 `agents/game_master.py` — the agent, and its contract as data
+
+> **Update (2026-07-09):** after the provider change, `build_game_master` no
+> longer passes `settings.model` directly. A private `_resolve_model(settings)`
+> helper now sits between them: for `anthropic` it returns a
+> `LitellmModel(model="anthropic/<id>", api_key=settings.api_key)` object; for
+> `openai` it returns the bare model string. The factory signature and the
+> instructions constant are unchanged; only the model-wiring gained one level of
+> indirection.
 
 **What:** the Game Master's behavior instructions live in a module-level
 constant `GAME_MASTER_INSTRUCTIONS`; a `build_game_master(settings)` factory
@@ -144,12 +166,13 @@ read the player's input → append it → repeat, until the player exits.
   harness without touching the agent, and we can test the agent without a
   console.
 
-- **Graceful no-key path (lines 38–44).** If there's no API key, the app prints
-  a friendly instruction and returns — it does **not** crash with a stack
-  trace, and it never even imports the SDK. Compare the two experiences: a new
-  user running the app with no key gets a sentence telling them exactly what to
-  do, versus a wall of red traceback. *Failing safely and legibly is a
-  feature.*
+- **Graceful no-key path.** If there's no API key, the app prints a friendly
+  instruction and returns — it does **not** crash with a stack trace, and it
+  never even imports the SDK. The message names the specific env var the
+  selected provider needs (via `settings.api_key_env_name`) and shows which
+  provider is active. Compare the two experiences: a new user running the app
+  with no key gets a sentence telling them exactly what to do, versus a wall of
+  red traceback. *Failing safely and legibly is a feature.*
 
 - **Conversation continuity (lines 59–65).** We keep a `conversation` list and,
   after each turn, replace it with `result.to_input_list()` — the SDK's
@@ -176,9 +199,10 @@ read the player's input → append it → repeat, until the player exits.
 
 ### 2.6 `tests/test_smoke.py` — evidence, with no API key
 
-**What:** six tests that verify the package imports, config defaults and
-overrides work, the `has_api_key` flag behaves, and the GM instructions encode
-the behavioral contract. **They pass with no API key and no SDK installed.**
+**What:** eight tests that verify the package imports, config defaults and
+overrides work, provider selection, the `has_api_key` flag, and the GM
+instructions encode the behavioral contract. **They pass with no API key and
+no SDK installed.**
 
 **Why it matters:**
 - A **smoke test** answers the most basic question — "is the thing even
@@ -231,10 +255,11 @@ Even at this tiny scale, the project already reflects a tester's instincts:
 # Deterministic suite — no API key needed
 python -m pip install pytest python-dotenv pydantic rich
 python -m pip install -e . --no-deps          # install the package itself
-python -m pytest -m "not llm" -q              # expect: 6 passed
+python -m pytest -m "not llm" -q              # expect: 8 passed
 
 # Verify the safe-failure path (no key set):
-#   prints a friendly "No OPENAI_API_KEY found" message, no traceback
+#   prints a friendly "No <PROVIDER_KEY_ENV> found." message, no traceback
+#   (e.g. "No ANTHROPIC_API_KEY found." for the default provider)
 
 # Full run (needs a key):
 python -m pip install -e .                     # pulls the SDK too
@@ -242,7 +267,7 @@ copy .env.example .env                          # then edit .env, add your key
 dungeon-agents                                  # play; type `exit` to quit
 ```
 
-**Expected smoke-test result:** `6 passed`.
+**Expected smoke-test result:** `8 passed`.
 
 ---
 

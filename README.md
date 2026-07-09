@@ -17,10 +17,23 @@ no multi-agent setup yet — those arrive in later milestones.
 
 - Python 3.11+ (developed on 3.12)
 - [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/) — agent runtime
+- **Model provider: Anthropic (Claude) by default, or OpenAI** — selectable via
+  `DUNGEON_PROVIDER`. Anthropic is routed through the SDK's LiteLLM adapter, so
+  the game logic is identical regardless of vendor.
 - Pydantic — models & validation (from M3)
 - pytest — tests
 - python-dotenv — environment variables
 - Rich — console output
+
+### Choosing a provider
+
+| `DUNGEON_PROVIDER` | Key env var         | Default model (cheapest for that vendor)        |
+|--------------------|---------------------|-------------------------------------------------|
+| `anthropic` (default) | `ANTHROPIC_API_KEY` | `claude-haiku-4-5` — $1 / $5 per 1M tokens      |
+| `openai`           | `OPENAI_API_KEY`    | `gpt-4o-mini`                                   |
+
+Override the model for either with `DUNGEON_MODEL`. Get an Anthropic key at
+<https://console.anthropic.com/>.
 
 ## Setup
 
@@ -38,7 +51,8 @@ python -m pip install -e .
 # 3. Configure your API key
 copy .env.example .env      # Windows
 # cp .env.example .env      # macOS/Linux
-# then edit .env and set OPENAI_API_KEY
+# then edit .env: keep DUNGEON_PROVIDER=anthropic and set ANTHROPIC_API_KEY
+# (or set DUNGEON_PROVIDER=openai and OPENAI_API_KEY)
 ```
 
 ## Run
@@ -52,8 +66,8 @@ python -m dungeon_agents.main
 ```
 
 Type an action and press Enter. Type `exit` or `quit` (or press Ctrl+C) to
-leave. Without an `OPENAI_API_KEY`, the app prints a friendly message and exits
-cleanly instead of crashing.
+leave. Without the API key for your selected provider, the app prints a friendly
+message and exits cleanly instead of crashing.
 
 ## Tests
 

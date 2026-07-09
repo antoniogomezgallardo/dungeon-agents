@@ -5,7 +5,9 @@ description = "A console fantasy RPG for learning agentic AI patterns, en route 
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "openai-agents>=0.18.0",
+    # The [litellm] extra pulls in the adapter that lets the OpenAI Agents SDK
+    # talk to Anthropic (Claude) and other providers.
+    "openai-agents[litellm]>=0.18.0",
     "pydantic>=2.7",
     "python-dotenv>=1.0",
     "rich>=13.7",

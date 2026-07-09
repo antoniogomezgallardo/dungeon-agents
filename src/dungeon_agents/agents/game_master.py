@@ -11,7 +11,7 @@ this constant is always safe.
 
 from __future__ import annotations
 
-from dungeon_agents.config import Settings
+from dungeon_agents.config import PROVIDER_ANTHROPIC, Settings
 
 GAME_MASTER_INSTRUCTIONS = """\
 You are the Game Master of a fantasy tabletop RPG played in a terminal.
@@ -32,6 +32,25 @@ Rules:
 """
 
 
+def _resolve_model(settings: Settings):
+    """Return the model object/name for the configured provider.
+
+    - OpenAI: pass the bare model name; the SDK's default OpenAI client handles it.
+    - Anthropic: wrap the model in the SDK's LiteLLM adapter, which translates
+      calls to the Anthropic API. Same Agent/Runner code path either way.
+
+    Imported lazily so importing this module (e.g. in the smoke test) never
+    requires the SDK, the litellm extra, or an API key.
+    """
+    if settings.provider == PROVIDER_ANTHROPIC:
+        from agents.extensions.models.litellm_model import LitellmModel
+
+        # LiteLLM identifies Anthropic models as "anthropic/<model-id>".
+        return LitellmModel(model=f"anthropic/{settings.model}", api_key=settings.api_key)
+
+    return settings.model
+
+
 def build_game_master(settings: Settings):
     """Construct the Game Master agent from the OpenAI Agents SDK.
 
@@ -43,5 +62,5 @@ def build_game_master(settings: Settings):
     return Agent(
         name="Game Master",
         instructions=GAME_MASTER_INSTRUCTIONS,
-        model=settings.model,
+        model=_resolve_model(settings),
     )
