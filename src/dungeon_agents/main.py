@@ -44,10 +44,14 @@ def run() -> None:
         )
         return
 
-    # Imported lazily so the "no key" message above never trips over a missing SDK.
-    from agents import Runner
+    # The SDK import is heavy (several seconds on first run) and blocks silently.
+    # Show a status so the console doesn't look frozen — otherwise the first
+    # launch feels like a hang. Imported lazily so the "no key" message above
+    # never trips over a missing SDK.
+    with console.status("[dim]Loading the game engine (first run can take a moment)…[/dim]"):
+        from agents import Runner
 
-    game_master = build_game_master(settings)
+        game_master = build_game_master(settings)
 
     console.print(
         Panel(
