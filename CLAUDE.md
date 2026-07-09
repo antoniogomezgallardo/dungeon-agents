@@ -44,12 +44,18 @@ features.
 
 ## Runtime decision
 
-OpenAI Agents SDK (chosen 2026-07-08). Uses `OPENAI_API_KEY`. Model configurable
-via `DUNGEON_MODEL` (default `gpt-4o-mini`).
+OpenAI Agents SDK (chosen 2026-07-08). **Provider is selectable** via
+`DUNGEON_PROVIDER` (added 2026-07-09): `anthropic` (default) or `openai`.
+- `anthropic` → `ANTHROPIC_API_KEY`, default model `claude-haiku-4-5`, routed
+  through the SDK's LiteLLM adapter (`agents.extensions.models.litellm_model`,
+  model string `anthropic/<id>`). Needs the `openai-agents[litellm]` extra.
+- `openai` → `OPENAI_API_KEY`, default model `gpt-4o-mini`, native SDK path.
+Override either default with `DUNGEON_MODEL`. Only `config.py` reads env vars;
+only `game_master.py` touches the SDK/LiteLLM.
 
 ## Milestone status
 
 - **M1 — Single Game Master agent: DONE.** Console loop, `exit`/`quit`/Ctrl+C
-  to quit, GM ends turns with 2–3 choices, graceful no-key message, 6 smoke
+  to quit, GM ends turns with 2–3 choices, graceful no-key message, 8 smoke
   tests passing with no API key.
 - M2–M8: not started. See README roadmap.
