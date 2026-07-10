@@ -12,11 +12,14 @@ from pathlib import Path
 
 import pytest
 
+from dungeon_agents.domain.models import GameState, Player
 from dungeon_agents.domain.state import (
     STATE_FILENAME,
     StateError,
     load_game_state,
+    load_state,
     save_game_state,
+    save_state,
 )
 
 
@@ -62,3 +65,31 @@ def test_save_normalizes_formatting(tmp_path: Path) -> None:
     on_disk = (tmp_path / STATE_FILENAME).read_text(encoding="utf-8")
     # sort_keys=True means "a" is written before "b".
     assert on_disk.index('"a"') < on_disk.index('"b"')
+
+
+# --- Pydantic-validated persistence (Milestone 3) ----------------------------
+
+def test_save_state_then_load_state_roundtrips(tmp_path: Path) -> None:
+    """A validated GameState saved and reloaded comes back equal."""
+    original = GameState(player=Player(name="Aria", hp=30, gold=7), location="tavern")
+    save_state(original, data_dir=tmp_path)
+
+    loaded = load_state(data_dir=tmp_path)
+    assert loaded == original  # Pydantic models compare by value
+
+
+def test_load_state_with_no_save_returns_none(tmp_path: Path) -> None:
+    """A fresh game (no save yet) loads as None, not a crash."""
+    assert load_state(data_dir=tmp_path) is None
+
+
+def test_load_state_rejects_schema_mismatch(tmp_path: Path) -> None:
+    """A save that is valid JSON but violates the GameState schema fails loudly.
+
+    Here hp is negative — valid JSON, invalid game state. Loading it must raise
+    StateError rather than return a half-valid object (M3 acceptance criterion).
+    """
+    bad = '{"player": {"name": "X", "hp": -50}}'
+    (tmp_path / STATE_FILENAME).write_text(bad, encoding="utf-8")
+    with pytest.raises(StateError):
+        load_state(data_dir=tmp_path)
