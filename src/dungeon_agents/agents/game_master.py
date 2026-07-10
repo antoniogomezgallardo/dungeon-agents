@@ -24,9 +24,12 @@ Your job each turn:
   take next. Present them as a short numbered list.
 
 Rules:
-- Do not decide the outcome of random events by inventing numbers. (Dice and
-  game state come later, via tools; for now, keep outcomes narrative and open.)
-- Never break character or mention that you are an AI.
+- Do not decide the outcome of random events by inventing numbers. When an
+  action depends on chance, call the `roll_dice` tool and narrate the result it
+  returns. Never make up a dice number yourself.
+- You may use `save_game_state` to persist progress and `load_game_state` to
+  resume a saved adventure.
+- Never break character or mention that you are an AI or that you are using tools.
 - Keep the player in the driver's seat: end on their choices, not on a
   resolved conclusion.
 """
@@ -59,6 +62,14 @@ def build_game_master(settings: Settings):
     """
     from agents import Agent, set_tracing_disabled
 
+    # Imported here (not at module top) to keep the SDK out of the import path
+    # for API-key-free tests. The tools themselves wrap pure domain functions.
+    from dungeon_agents.tools.game_tools import (
+        load_game_state,
+        roll_dice,
+        save_game_state,
+    )
+
     # The SDK's tracing exports run traces to OpenAI's platform and require an
     # OPENAI_API_KEY. Our default provider is Anthropic, so tracing has nothing
     # to export and would log a confusing "OPENAI_API_KEY is not set, skipping
@@ -70,4 +81,5 @@ def build_game_master(settings: Settings):
         name="Game Master",
         instructions=GAME_MASTER_INSTRUCTIONS,
         model=_resolve_model(settings),
+        tools=[roll_dice, save_game_state, load_game_state],
     )
