@@ -125,4 +125,19 @@ pip install -e ".[dev]"
   tools. `HELP_TEXT` updated with inventory, gold, HP limits, win/lose conditions.
   78 deterministic tests (8 smoke + 12 dice + 9 state + 20 models + 29 rules),
   all passing without an API key.
-- M5–M8: not started. See README roadmap.
+- **M5 — Session state & UX: IN PROGRESS / not yet built.** Three-part scope:
+  (A) save-format unification — fix the conflict between M2 free-form-JSON save
+  tools and the M3 validated save/load; retire the free-form tools, unify on the
+  validated `GameState` schema, and discard incompatible old saves with a friendly
+  message rather than crashing. (B) session management — allow starting a new
+  game even when a save exists; on load, show a deterministic recap of prior
+  events plus the last scene so the player resumes exactly where they left off;
+  after meta-commands like save/help (except exit) re-show the last scene.
+  (C) state on demand — `stats` and `inventory` commands read HP, gold, inventory,
+  and quest directly from the validated `GameState` (deterministic output, not
+  AI-narrated).
+- M6 — Multi-agent (Game Master, Rules Referee, Inventory Keeper, Lore Keeper,
+  Critic): not started.
+- M7 — Guardrails & safety constraints: not started.
+- M8 — Evaluation & tests: not started.
+- M9 — Bridge to QA/TestOps AI (`docs/qa_migration_notes.md`): not started.

@@ -7,19 +7,18 @@ A small console fantasy RPG driven by AI agents.
 > Python — patterns that will later migrate into a QA/Testing product,
 > **TestOps AI**. The RPG is the pretext; testability and clarity are the goal.
 
-## Current milestone: **M4 — Inventory & game rules**
+## Current milestone: **M5 — Session state & UX** (in progress)
 
-Nine deterministic rule functions in `domain/rules.py` give the game its first
-enforced mechanics: **`add_item`** / **`remove_item`** (can't use an item you
-don't have), **`spend_gold`** / **`earn_gold`** (can't spend more than you carry),
-**`change_hp`** (HP clamped to `[0, max_hp]` — damage and healing both safe),
-**`complete_quest`** / **`is_game_won`** / **`is_game_over`** (win by completing
-the active quest; lose when HP hits 0). Four new agent tools (`get_inventory`,
-`add_item`, `remove_item`, `validate_action`) follow a **load-modify-save** pattern:
-load current state, apply the rule, persist the new state on success, return the
-rule's message for the GM to narrate. All rules are pure functions (no mutation,
-no SDK), so each is trivially tested in isolation. The deterministic test suite is
-now **78 tests**, all passing without an API key.
+M4 is done. M5 is the next milestone to be built — scope below.
+
+**M4 — Inventory & game rules (done).** Nine deterministic rule functions in
+`domain/rules.py` give the game its first enforced mechanics: **`add_item`** /
+**`remove_item`** (can't use an item you don't have), **`spend_gold`** /
+**`earn_gold`** (can't spend more than you carry), **`change_hp`** (HP clamped
+to `[0, max_hp]` — damage and healing both safe), **`complete_quest`** /
+**`is_game_won`** / **`is_game_over`** (win by completing the active quest; lose
+when HP hits 0). Four new agent tools follow a **load-modify-save** pattern. 78
+deterministic tests passing without an API key.
 
 **M3 — Domain models (done).** Five Pydantic models (`InventoryItem`, `Player`,
 `Quest`, `GameState`, `ActionResult`) and two validated persistence functions
@@ -180,8 +179,9 @@ document** explaining what was built and *why* — see
 1. **Single Game Master agent** ✅ done
 2. **Deterministic tools** (`roll_dice`, load/save state) ✅ done
 3. **Pydantic domain models** (`Player`, `GameState`, `InventoryItem`, `Quest`, `ActionResult`) ✅ done
-4. **Inventory & game rules** (pure rule functions, 4 new tools, win/lose conditions) ✅ done ← *you are here*
-5. Multi-agent (Game Master, Rules Referee, Inventory Keeper, Lore Keeper, Critic)
-6. Guardrails & safety constraints
-7. Evaluation & tests
-8. Bridge to QA/TestOps AI (`docs/qa_migration_notes.md`)
+4. **Inventory & game rules** (pure rule functions, 4 new tools, win/lose conditions) ✅ done
+5. **Session state & UX** (save-format unification, new-game vs load choice, resume recap, stats/inventory commands) ← *you are here*
+6. Multi-agent (Game Master, Rules Referee, Inventory Keeper, Lore Keeper, Critic)
+7. Guardrails & safety constraints
+8. Evaluation & tests
+9. Bridge to QA/TestOps AI (`docs/qa_migration_notes.md`)
