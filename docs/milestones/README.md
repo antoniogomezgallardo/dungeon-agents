@@ -11,7 +11,7 @@ Read them in order. Each one assumes you've read the previous.
 |-----------|----------|--------|
 | M1 | [milestone-01-game-master.md](milestone-01-game-master.md) | ✅ Done |
 | M2 | [milestone-02-tools.md](milestone-02-tools.md) | ✅ Done |
-| M3 | *domain models* | ⏳ Not started |
+| M3 | [milestone-03-domain-models.md](milestone-03-domain-models.md) | ✅ Done |
 | M4 | *inventory & rules* | ⏳ Not started |
 | M5 | *multi-agent* | ⏳ Not started |
 | M6 | *guardrails* | ⏳ Not started |

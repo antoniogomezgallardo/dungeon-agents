@@ -7,18 +7,25 @@ A small console fantasy RPG driven by AI agents.
 > Python — patterns that will later migrate into a QA/Testing product,
 > **TestOps AI**. The RPG is the pretext; testability and clarity are the goal.
 
-## Current milestone: **M2 — Deterministic tools**
+## Current milestone: **M3 — Domain models**
 
-The Game Master can now call three tools: **`roll_dice`** (validated, reproducible
-dice rolls from Python — never invented by the model), **`save_game_state`**, and
-**`load_game_state`** (bounded, JSON-validated persistence in `data/`, which is
-git-ignored). Two new architectural layers were introduced: `domain/` (pure Python,
-zero SDK — the testable business logic) and `tools/` (thin `@function_tool`
-wrappers that expose the domain to the agent). SDK hooks surface each tool call
-as a dim `[tool] roll_dice -> ...` line in the console — observability without
-changing behavior. A startup help panel and `help` meta-command explain free-text
-play and set honest expectations about what the current milestone supports.
-The deterministic test suite is now 26 tests, all passing without an API key.
+Five Pydantic domain models now define the validated shape of the game state:
+**`InventoryItem`**, **`Player`** (hp clamped to `[0, MAX_HP]`, gold non-negative),
+**`Quest`** (data only; rules come in M4), **`GameState`** (the container; nested
+validation cascades through the whole tree so nothing malformed can be built
+silently), and **`ActionResult`** (the explicit return type for M4 rules —
+`success` is required with no default). Two new persistence functions,
+`save_state` / `load_state`, serialize and validate against the schema; loading a
+file that violates the `GameState` schema raises `StateError` immediately. The M2
+raw-JSON tools are kept intact so the existing agent behavior is unchanged.
+The deterministic test suite is now **49 tests**, all passing without an API key.
+
+**M2 — Deterministic tools (done).** `roll_dice` (validated, reproducible dice
+rolls from Python — never invented by the model), `save_game_state`, and
+`load_game_state` (bounded, JSON-validated persistence in `data/`). Domain layer
+(`domain/`) and tools layer (`tools/`) introduced. SDK hooks surface each tool
+call as a dim `[tool] roll_dice -> ...` line in the console. 26 deterministic
+tests.
 
 ## Tech stack
 
@@ -118,7 +125,7 @@ no separate install needed.
 - **LLM tests** (`@pytest.mark.llm`): make real model calls. None exist yet;
   they arrive in Milestone 7 and stay separate from the deterministic suite.
 
-## Project structure (M2)
+## Project structure (M3)
 
 ```text
 dungeon-agents/
@@ -129,16 +136,19 @@ dungeon-agents/
     config.py            # the ONLY place env vars are read
     main.py              # console loop + I/O
     domain/              # pure Python, zero SDK — testable business logic
+      models.py          # 5 Pydantic models: InventoryItem, Player, Quest, GameState, ActionResult
       dice.py            # roll_dice(), InvalidDiceError, MIN/MAX_SIDES
-      state.py           # save_game_state(), load_game_state(), StateError
+      state.py           # save_game_state/load_game_state (M2 raw-JSON) +
+                         # save_state/load_state (M3 validated) + StateError
     tools/               # thin @function_tool wrappers; one of two SDK-touching layers
       game_tools.py      # roll_dice, save_game_state, load_game_state tools
     agents/
       game_master.py     # Game Master agent + GAME_MASTER_INSTRUCTIONS constant
   tests/
-    test_smoke.py        # 8 tests — runs with no API key
+    test_smoke.py        # 8 tests  — imports, config, provider, agent contract
     test_dice.py         # 12 tests — dice domain logic
-    test_state.py        # 6 tests  — state persistence
+    test_state.py        # 9 tests  — state persistence (6 M2 + 3 M3 validated)
+    test_models.py       # 20 tests — Pydantic model validation
 ```
 
 The structure grows one milestone at a time — files appear when their milestone
@@ -154,8 +164,8 @@ document** explaining what was built and *why* — see
 ## Roadmap
 
 1. **Single Game Master agent** ✅ done
-2. **Deterministic tools** (`roll_dice`, load/save state) ← *you are here*
-3. Pydantic domain models (`Player`, `GameState`, `InventoryItem`, `Quest`, `ActionResult`)
+2. **Deterministic tools** (`roll_dice`, load/save state) ✅ done
+3. **Pydantic domain models** (`Player`, `GameState`, `InventoryItem`, `Quest`, `ActionResult`) ← *you are here*
 4. Inventory & game rules
 5. Multi-agent (Game Master, Rules Referee, Inventory Keeper, Lore Keeper, Critic)
 6. Guardrails & safety constraints
