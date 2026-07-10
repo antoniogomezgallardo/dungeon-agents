@@ -29,9 +29,10 @@ features.
 ## Architecture rules
 
 - **`config.py` is the only module that reads environment variables.**
-- **The domain layer (`domain/`) must have zero SDK dependency** — pure Python,
-  unit-testable without an API key. Introduced in M2; the rule is established.
-  Only `agents/` and `tools/` touch the OpenAI Agents SDK (import name: `agents`).
+- **The domain layer (`domain/`, from M2) must have zero SDK dependency** — pure
+  Python, unit-testable without an API key. Only `agents/` and `tools/` touch the
+  OpenAI Agents SDK (import name: `agents`). From M3, `domain/models.py` holds the
+  Pydantic data contract; Pydantic itself has no SDK dependency.
 - Agent definitions live in `agents/*.py`; console I/O lives in `main.py`.
 - Keep agent instructions as module-level constants so their behavioral
   contract can be asserted in tests without an API key.
@@ -95,4 +96,17 @@ pip install -e ".[dev]"
   clarified to show free-text is allowed; all console output is ASCII-only for
   Windows `cp1252` portability. 26 deterministic tests passing with no API key
   (8 smoke + 12 dice + 6 state). Saved state lives in `data/` (git-ignored).
-- M3–M8: not started. See README roadmap.
+- **M3 — Domain models: DONE.** Five Pydantic models in `domain/models.py` (pure
+  Python, zero SDK): `InventoryItem` (name non-empty, quantity ge=1), `Player`
+  (name non-empty, hp 0..MAX_HP=100, max_hp ge=1, gold ge=0), `Quest` (title
+  non-empty, description, completed bool — data only; rules deferred to M4),
+  `GameState` (container: player + inventory + location + optional active_quest +
+  session_summary; nested validation cascades so a bad item or out-of-range hp
+  invalidates the whole state), `ActionResult` (success bool required/no default,
+  message, optional new_state). Two new persistence functions in `state.py`:
+  `save_state(GameState)` uses `model_dump_json`; `load_state()` uses
+  `model_validate_json` and raises `StateError` on schema mismatch. M2 raw-JSON
+  functions (`save_game_state`, `load_game_state`) kept intact so existing tools
+  are not broken. 49 deterministic tests (8 smoke + 12 dice + 9 state + 20
+  models), all passing without an API key.
+- M4–M8: not started. See README roadmap.
