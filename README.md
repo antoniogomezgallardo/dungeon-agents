@@ -7,18 +7,24 @@ A small console fantasy RPG driven by AI agents.
 > Python — patterns that will later migrate into a QA/Testing product,
 > **TestOps AI**. The RPG is the pretext; testability and clarity are the goal.
 
-## Current milestone: **M3 — Domain models**
+## Current milestone: **M4 — Inventory & game rules**
 
-Five Pydantic domain models now define the validated shape of the game state:
-**`InventoryItem`**, **`Player`** (hp clamped to `[0, MAX_HP]`, gold non-negative),
-**`Quest`** (data only; rules come in M4), **`GameState`** (the container; nested
-validation cascades through the whole tree so nothing malformed can be built
-silently), and **`ActionResult`** (the explicit return type for M4 rules —
-`success` is required with no default). Two new persistence functions,
-`save_state` / `load_state`, serialize and validate against the schema; loading a
-file that violates the `GameState` schema raises `StateError` immediately. The M2
-raw-JSON tools are kept intact so the existing agent behavior is unchanged.
-The deterministic test suite is now **49 tests**, all passing without an API key.
+Nine deterministic rule functions in `domain/rules.py` give the game its first
+enforced mechanics: **`add_item`** / **`remove_item`** (can't use an item you
+don't have), **`spend_gold`** / **`earn_gold`** (can't spend more than you carry),
+**`change_hp`** (HP clamped to `[0, max_hp]` — damage and healing both safe),
+**`complete_quest`** / **`is_game_won`** / **`is_game_over`** (win by completing
+the active quest; lose when HP hits 0). Four new agent tools (`get_inventory`,
+`add_item`, `remove_item`, `validate_action`) follow a **load-modify-save** pattern:
+load current state, apply the rule, persist the new state on success, return the
+rule's message for the GM to narrate. All rules are pure functions (no mutation,
+no SDK), so each is trivially tested in isolation. The deterministic test suite is
+now **78 tests**, all passing without an API key.
+
+**M3 — Domain models (done).** Five Pydantic models (`InventoryItem`, `Player`,
+`Quest`, `GameState`, `ActionResult`) and two validated persistence functions
+(`save_state` / `load_state`). Invalid state cannot be built, saved, or loaded
+silently. 49 deterministic tests.
 
 **M2 — Deterministic tools (done).** `roll_dice` (validated, reproducible dice
 rolls from Python — never invented by the model), `save_game_state`, and
@@ -120,12 +126,17 @@ python -m pytest                  # everything
 `pytest` is included in the `[dev]` extra installed in the Setup step above —
 no separate install needed.
 
-- **Deterministic tests** (no `llm` marker): imports, config, agent contract,
-  dice logic, and state persistence. These are the CI-safe, reproducible checks.
+- **Deterministic tests** (no `llm` marker): **78 tests** across five files, all
+  passing without an API key:
+  - `test_smoke.py` — 8 tests: imports, config, provider selection, agent contract
+  - `test_dice.py` — 12 tests: dice domain logic, seeded RNG, bounds
+  - `test_state.py` — 9 tests: raw-JSON persistence (M2) + validated persistence (M3)
+  - `test_models.py` — 20 tests: Pydantic model validation and cascade
+  - `test_rules.py` — 29 tests: inventory rules, gold/HP rules, win/lose conditions
 - **LLM tests** (`@pytest.mark.llm`): make real model calls. None exist yet;
   they arrive in Milestone 7 and stay separate from the deterministic suite.
 
-## Project structure (M3)
+## Project structure (M4)
 
 ```text
 dungeon-agents/
@@ -140,8 +151,10 @@ dungeon-agents/
       dice.py            # roll_dice(), InvalidDiceError, MIN/MAX_SIDES
       state.py           # save_game_state/load_game_state (M2 raw-JSON) +
                          # save_state/load_state (M3 validated) + StateError
+      rules.py           # 9 pure rule functions: inventory, gold, HP, win/lose (M4)
     tools/               # thin @function_tool wrappers; one of two SDK-touching layers
-      game_tools.py      # roll_dice, save_game_state, load_game_state tools
+      game_tools.py      # 7 tools: roll_dice, save/load state (M2), get_inventory,
+                         # add_item, remove_item, validate_action (M4)
     agents/
       game_master.py     # Game Master agent + GAME_MASTER_INSTRUCTIONS constant
   tests/
@@ -149,6 +162,7 @@ dungeon-agents/
     test_dice.py         # 12 tests — dice domain logic
     test_state.py        # 9 tests  — state persistence (6 M2 + 3 M3 validated)
     test_models.py       # 20 tests — Pydantic model validation
+    test_rules.py        # 29 tests — inventory, gold, HP, win/lose rules (M4)
 ```
 
 The structure grows one milestone at a time — files appear when their milestone
@@ -165,8 +179,8 @@ document** explaining what was built and *why* — see
 
 1. **Single Game Master agent** ✅ done
 2. **Deterministic tools** (`roll_dice`, load/save state) ✅ done
-3. **Pydantic domain models** (`Player`, `GameState`, `InventoryItem`, `Quest`, `ActionResult`) ← *you are here*
-4. Inventory & game rules
+3. **Pydantic domain models** (`Player`, `GameState`, `InventoryItem`, `Quest`, `ActionResult`) ✅ done
+4. **Inventory & game rules** (pure rule functions, 4 new tools, win/lose conditions) ✅ done ← *you are here*
 5. Multi-agent (Game Master, Rules Referee, Inventory Keeper, Lore Keeper, Critic)
 6. Guardrails & safety constraints
 7. Evaluation & tests
