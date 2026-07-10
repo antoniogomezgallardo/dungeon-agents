@@ -21,17 +21,8 @@ from dungeon_agents.domain import dice, rules, state
 from dungeon_agents.domain.models import GameState, Player, Quest
 
 
-def _load_or_new_state() -> GameState:
-    """Return the current game state, creating a starter one if none is saved.
-
-    The inventory/resource tools follow a load-modify-save pattern so state
-    persists between turns in `data/game_state.json` (validated by M3). If no
-    save exists yet, we seed a new game with a default hero and an opening quest
-    so there is always a valid state and a goal to complete.
-    """
-    current = state.load_state()
-    if current is not None:
-        return current
+def new_game_state() -> GameState:
+    """Build a fresh starter game: a default hero and an opening quest."""
     return GameState(
         player=Player(name="Adventurer"),
         location="the Broken Wheel Inn",
@@ -40,6 +31,17 @@ def _load_or_new_state() -> GameState:
             description="Deal with whatever is lurking in the inn's cellar.",
         ),
     )
+
+
+def _load_or_new_state() -> GameState:
+    """Return the current game state, creating a starter one if none is valid.
+
+    All game tools follow a load-modify-save pattern over a single, validated
+    save format (M5 unified persistence). `load_state_or_none` tolerantly returns
+    None for a missing OR incompatible save, so an old/foreign save never crashes
+    a tool — we just start fresh instead.
+    """
+    return state.load_state_or_none() or new_game_state()
 
 
 def _apply(result) -> str:
@@ -73,33 +75,34 @@ def roll_dice(sides: int) -> str:
 
 
 @function_tool
-def save_game_state(state_json: str) -> str:
-    """Save the current game state so it persists between sessions.
+def save_game() -> str:
+    """Save the player's current progress so it persists between sessions.
 
-    Provide the full game state as a JSON string (for now, any valid JSON —
-    e.g. player name, hp, gold, location). The state is stored in a safe project
-    directory; you cannot choose where it is written.
-
-    Args:
-        state_json: The game state to save, as a valid JSON string.
+    Saves the game's validated state (player, inventory, gold, HP, location,
+    quest) to a safe project directory. Call this when the player asks to save.
+    You do not pass any data — the current tracked game state is saved as-is.
     """
-    try:
-        return state.save_game_state(state_json)
-    except state.StateError as exc:
-        return f"Could not save game state: {exc}"
+    current = state.load_state_or_none() or new_game_state()
+    return state.save_state(current)
 
 
 @function_tool
-def load_game_state() -> str:
-    """Load the saved game state and return it as a JSON string.
+def load_game() -> str:
+    """Resume the player's saved adventure and summarize where they left off.
 
-    Use this at the start of a session to resume a saved adventure. Returns
-    "{}" (an empty state) if there is no saved game yet.
+    Call this when the player asks to load or continue a saved game. Returns a
+    short factual summary of the saved state (or a note that no valid save
+    exists, in which case a new game begins).
     """
-    try:
-        return state.load_game_state()
-    except state.StateError as exc:
-        return f"Could not load game state: {exc}"
+    saved = state.load_state_or_none()
+    if saved is None:
+        return "No saved game found (or it was incompatible). Starting a new adventure."
+    p = saved.player
+    quest = saved.active_quest.title if saved.active_quest else "none"
+    return (
+        f"Resumed. {p.name} is at {saved.location} with {p.hp}/{p.max_hp} HP and "
+        f"{p.gold} gold. Active quest: {quest}."
+    )
 
 
 # --- Milestone 4: inventory & rule tools -------------------------------------

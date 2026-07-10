@@ -16,7 +16,6 @@ Pure Python, no SDK. Unit-testable without an API key.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -40,72 +39,13 @@ def _state_path(data_dir: Path) -> Path:
     return data_dir / STATE_FILENAME
 
 
-def save_game_state(state_json: str, *, data_dir: Path | None = None) -> str:
-    """Validate `state_json` and write it to the state file.
-
-    Args:
-        state_json: The game state as a JSON string. Must parse as valid JSON.
-        data_dir: Where to store the file. Defaults to the project's `data/`.
-            Injectable so tests can use a temp directory (reproducible, isolated).
-
-    Returns:
-        A short human-friendly confirmation message (handy as a tool result).
-
-    Raises:
-        StateError: If `state_json` is not valid JSON. Failing here keeps a
-            malformed blob from ever reaching disk.
-    """
-    try:
-        # Parse then re-dump: this both validates the input is real JSON and
-        # normalizes the on-disk format (pretty, stable key order).
-        parsed = json.loads(state_json)
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise StateError(f"state must be valid JSON: {exc}") from exc
-
-    target_dir = data_dir or DEFAULT_DATA_DIR
-    target_dir.mkdir(parents=True, exist_ok=True)
-    path = _state_path(target_dir)
-    path.write_text(json.dumps(parsed, indent=2, sort_keys=True), encoding="utf-8")
-
-    return f"Game state saved to {path.name}."
-
-
-def load_game_state(*, data_dir: Path | None = None) -> str:
-    """Read the saved game state and return it as a JSON string.
-
-    Args:
-        data_dir: Where to read from. Defaults to the project's `data/`.
-
-    Returns:
-        The saved state as a JSON string, or an empty-object string `"{}"` when
-        no save exists yet — a safe default so callers never crash on a missing
-        file (a fresh game just starts from an empty state).
-
-    Raises:
-        StateError: If a save file exists but is corrupt (not valid JSON).
-    """
-    path = _state_path(data_dir or DEFAULT_DATA_DIR)
-    if not path.exists():
-        return "{}"
-
-    raw = path.read_text(encoding="utf-8")
-    try:
-        # Validate on read too: a corrupt save should fail loudly, not feed
-        # garbage back into the game.
-        json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise StateError(f"saved state is corrupt: {exc}") from exc
-
-    return raw
-
-
-# --- Pydantic-validated persistence (Milestone 3) ----------------------------
+# --- Pydantic-validated persistence (single save format, unified in M5) ------
 #
-# The two functions above (save_game_state/load_game_state) work with raw JSON
-# strings — that's what the M2 tools expose. These two work with a validated
-# `GameState` model instead. They reuse the same bounded, safe file handling but
-# add the M3 guarantee: state that doesn't match the GameState schema is rejected
-# loudly (a malformed save can never be written or silently loaded).
+# Persistence works with the validated `GameState` model only. (Milestone 2's
+# raw-JSON save/load was retired in M5: two formats coexisting caused a save
+# written by one to be unreadable by the other. One validated format removes
+# that whole class of bug.) Writes are still confined to the data directory, and
+# state that doesn't match the GameState schema is rejected loudly.
 
 
 def save_state(state: GameState, *, data_dir: Path | None = None) -> str:
@@ -129,12 +69,12 @@ def load_state(*, data_dir: Path | None = None) -> GameState | None:
     """Load and validate the saved state into a `GameState`.
 
     Returns:
-        A validated GameState, or None when no save exists yet (a fresh game).
+        A validated GameState, or None when no valid save exists.
 
     Raises:
         StateError: If a save exists but does not match the GameState schema —
-            failing loudly instead of returning a half-valid object. This is the
-            M3 acceptance criterion: invalid state cannot be loaded silently.
+            failing loudly. Use `load_state_or_none` for the tolerant variant the
+            game loop uses to discard incompatible saves gracefully.
     """
     path = _state_path(data_dir or DEFAULT_DATA_DIR)
     if not path.exists():
@@ -146,3 +86,30 @@ def load_state(*, data_dir: Path | None = None) -> GameState | None:
         return GameState.model_validate_json(raw)
     except ValidationError as exc:
         raise StateError(f"saved state does not match the game schema: {exc}") from exc
+
+
+def load_state_or_none(*, data_dir: Path | None = None) -> GameState | None:
+    """Load the saved state, returning None if it's missing OR incompatible.
+
+    The Milestone 5 change: the game once had two save formats (M2 free-form JSON
+    and M3's validated GameState) that could clash — a save written in the old
+    format failed the schema on load and crashed a tool. Now there is one
+    validated format, and this tolerant loader lets the game *discard* an
+    old/incompatible save instead of erroring: if the file doesn't match the
+    current schema, we treat it as "no valid save" and let the caller start
+    fresh with a friendly message.
+
+    Returns:
+        A validated GameState, or None when there is no save or the save is
+        incompatible with the current game schema.
+    """
+    try:
+        return load_state(data_dir=data_dir)
+    except StateError:
+        return None
+
+
+def clear_state(*, data_dir: Path | None = None) -> None:
+    """Delete the saved state file if it exists (used to start a new game)."""
+    path = _state_path(data_dir or DEFAULT_DATA_DIR)
+    path.unlink(missing_ok=True)

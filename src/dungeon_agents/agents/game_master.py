@@ -37,8 +37,8 @@ Rules:
     they don't have).
 - When a rule tool reports a failure, explain it to the player in a friendly,
   in-character way rather than ignoring it.
-- You may use `save_game_state` to persist progress and `load_game_state` to
-  resume a saved adventure.
+- You may use `save_game` to persist progress and `load_game` to resume a saved
+  adventure.
 - Never break character or mention that you are an AI or that you are using tools.
 - Keep the player in the driver's seat: end on their choices, not on a
   resolved conclusion.
@@ -77,10 +77,10 @@ def build_game_master(settings: Settings):
     from dungeon_agents.tools.game_tools import (
         add_item,
         get_inventory,
-        load_game_state,
+        load_game,
         remove_item,
         roll_dice,
-        save_game_state,
+        save_game,
         validate_action,
     )
 
@@ -97,8 +97,8 @@ def build_game_master(settings: Settings):
         model=_resolve_model(settings),
         tools=[
             roll_dice,
-            save_game_state,
-            load_game_state,
+            save_game,
+            load_game,
             get_inventory,
             add_item,
             remove_item,
