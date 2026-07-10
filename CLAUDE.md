@@ -32,7 +32,9 @@ features.
 - **The domain layer (`domain/`, from M2) must have zero SDK dependency** — pure
   Python, unit-testable without an API key. Only `agents/` and `tools/` touch the
   OpenAI Agents SDK (import name: `agents`). From M3, `domain/models.py` holds the
-  Pydantic data contract; Pydantic itself has no SDK dependency.
+  Pydantic data contract; Pydantic itself has no SDK dependency. From M4,
+  `domain/rules.py` holds the deterministic game rules (pure functions:
+  `GameState` → `ActionResult`); no SDK import.
 - Agent definitions live in `agents/*.py`; console I/O lives in `main.py`.
 - Keep agent instructions as module-level constants so their behavioral
   contract can be asserted in tests without an API key.
@@ -109,4 +111,18 @@ pip install -e ".[dev]"
   functions (`save_game_state`, `load_game_state`) kept intact so existing tools
   are not broken. 49 deterministic tests (8 smoke + 12 dice + 9 state + 20
   models), all passing without an API key.
-- M4–M8: not started. See README roadmap.
+- **M4 — Inventory & game rules: DONE.** Nine pure rule functions in
+  `domain/rules.py` (zero SDK): `get_inventory`, `add_item`, `remove_item`
+  (can't remove items you don't have), `spend_gold` (can't overspend), `earn_gold`,
+  `change_hp` (HP clamped to [0, max_hp] via `max(0, min(v, cap))`),
+  `complete_quest`, `is_game_won`, `is_game_over`. Each takes a `GameState` and
+  returns an `ActionResult` (or bool for win/lose); never mutates input
+  (`model_copy(deep=True)`). Four new `@function_tool` wrappers in
+  `game_tools.py` → 7 tools total: `get_inventory`, `add_item`, `remove_item`,
+  `validate_action`; all follow load-modify-save via `_load_or_new_state()` /
+  `_apply()`. `_load_or_new_state` seeds a starter game with `Player` + opening
+  `Quest` if no save exists. Game Master instructions updated to enforce rules via
+  tools. `HELP_TEXT` updated with inventory, gold, HP limits, win/lose conditions.
+  78 deterministic tests (8 smoke + 12 dice + 9 state + 20 models + 29 rules),
+  all passing without an API key.
+- M5–M8: not started. See README roadmap.
