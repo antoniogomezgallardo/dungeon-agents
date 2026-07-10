@@ -7,11 +7,18 @@ A small console fantasy RPG driven by AI agents.
 > Python — patterns that will later migrate into a QA/Testing product,
 > **TestOps AI**. The RPG is the pretext; testability and clarity are the goal.
 
-## Current milestone: **M1 — Single Game Master agent**
+## Current milestone: **M2 — Deterministic tools**
 
-A terminal loop where you type an action and a single Game Master agent replies
-with a short scene, always ending with 2–3 choices. No persistence, no tools,
-no multi-agent setup yet — those arrive in later milestones.
+The Game Master can now call three tools: **`roll_dice`** (validated, reproducible
+dice rolls from Python — never invented by the model), **`save_game_state`**, and
+**`load_game_state`** (bounded, JSON-validated persistence in `data/`, which is
+git-ignored). Two new architectural layers were introduced: `domain/` (pure Python,
+zero SDK — the testable business logic) and `tools/` (thin `@function_tool`
+wrappers that expose the domain to the agent). SDK hooks surface each tool call
+as a dim `[tool] roll_dice -> ...` line in the console — observability without
+changing behavior. A startup help panel and `help` meta-command explain free-text
+play and set honest expectations about what the current milestone supports.
+The deterministic test suite is now 26 tests, all passing without an API key.
 
 ## Tech stack
 
@@ -79,8 +86,14 @@ dungeon-agents
 python -m dungeon_agents.main
 ```
 
-Type an action and press Enter. Type `exit` or `quit` (or press Ctrl+C) to
-leave. Without the API key for your selected provider, the app prints a friendly
+The game is **free-text**: type an action in your own words (`I search the room`,
+`I attack the goblin`) *or* a numbered choice the Game Master offers — both work.
+A brief help panel appears at startup. Type `help` at any time to see it again
+(no game turn is consumed). Type `exit` or `quit` (or press Ctrl+C) to leave.
+
+Meta-commands: `help`, `save`, `load`, `exit`.
+
+Without the API key for your selected provider, the app prints a friendly
 message and exits cleanly instead of crashing.
 
 **First launch takes ~20 seconds** — this is normal. The OpenAI Agents SDK and
@@ -100,23 +113,32 @@ python -m pytest                  # everything
 `pytest` is included in the `[dev]` extra installed in the Setup step above —
 no separate install needed.
 
-- **Deterministic tests** (no `llm` marker): imports, config, agent contract.
-  These are the CI-safe, reproducible checks.
+- **Deterministic tests** (no `llm` marker): imports, config, agent contract,
+  dice logic, and state persistence. These are the CI-safe, reproducible checks.
 - **LLM tests** (`@pytest.mark.llm`): make real model calls. None exist yet;
   they arrive in Milestone 7 and stay separate from the deterministic suite.
 
-## Project structure (M1)
+## Project structure (M2)
 
 ```text
 dungeon-agents/
   pyproject.toml
   .env.example
+  data/                  # git-ignored; holds game_state.json when saved
   src/dungeon_agents/
     config.py            # the ONLY place env vars are read
     main.py              # console loop + I/O
-    agents/game_master.py# the single Game Master agent + its instructions
+    domain/              # pure Python, zero SDK — testable business logic
+      dice.py            # roll_dice(), InvalidDiceError, MIN/MAX_SIDES
+      state.py           # save_game_state(), load_game_state(), StateError
+    tools/               # thin @function_tool wrappers; one of two SDK-touching layers
+      game_tools.py      # roll_dice, save_game_state, load_game_state tools
+    agents/
+      game_master.py     # Game Master agent + GAME_MASTER_INSTRUCTIONS constant
   tests/
-    test_smoke.py        # runs with no API key
+    test_smoke.py        # 8 tests — runs with no API key
+    test_dice.py         # 12 tests — dice domain logic
+    test_state.py        # 6 tests  — state persistence
 ```
 
 The structure grows one milestone at a time — files appear when their milestone
@@ -131,8 +153,8 @@ document** explaining what was built and *why* — see
 
 ## Roadmap
 
-1. **Single Game Master agent** ← *you are here*
-2. Deterministic tools (`roll_dice`, load/save state)
+1. **Single Game Master agent** ✅ done
+2. **Deterministic tools** (`roll_dice`, load/save state) ← *you are here*
 3. Pydantic domain models (`Player`, `GameState`, `InventoryItem`, `Quest`, `ActionResult`)
 4. Inventory & game rules
 5. Multi-agent (Game Master, Rules Referee, Inventory Keeper, Lore Keeper, Critic)

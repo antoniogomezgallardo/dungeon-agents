@@ -29,9 +29,9 @@ features.
 ## Architecture rules
 
 - **`config.py` is the only module that reads environment variables.**
-- **The domain layer (`domain/`, from M3) must have zero SDK dependency** — pure
-  Python, unit-testable without an API key. Only `agents/` and `tools/` touch
-  the OpenAI Agents SDK (import name: `agents`).
+- **The domain layer (`domain/`) must have zero SDK dependency** — pure Python,
+  unit-testable without an API key. Introduced in M2; the rule is established.
+  Only `agents/` and `tools/` touch the OpenAI Agents SDK (import name: `agents`).
 - Agent definitions live in `agents/*.py`; console I/O lives in `main.py`.
 - Keep agent instructions as module-level constants so their behavioral
   contract can be asserted in tests without an API key.
@@ -83,4 +83,16 @@ pip install -e ".[dev]"
 - **M1 — Single Game Master agent: DONE.** Console loop, `exit`/`quit`/Ctrl+C
   to quit, GM ends turns with 2–3 choices, graceful no-key message, 8 smoke
   tests passing with no API key.
-- M2–M8: not started. See README roadmap.
+- **M2 — Deterministic tools: DONE.** `domain/` layer (pure Python, zero SDK):
+  `dice.py` (`roll_dice`, `InvalidDiceError`, seeded-rng injection) and
+  `state.py` (`save_game_state`, `load_game_state`, `StateError`, bounded writes,
+  JSON validation, `tmp_path` injection). `tools/` layer: thin `@function_tool`
+  wrappers for all three. Game Master wired with `tools=[roll_dice,
+  save_game_state, load_game_state]`; instructions updated to call `roll_dice`
+  for chance. `main.py`: SDK hooks (`RunHooks` subclass) print dim `[tool]`
+  lines for each tool call (observability, not behavior change); startup help
+  panel + `help`/`?`/`/help` meta-command (no game turn consumed); input prompt
+  clarified to show free-text is allowed; all console output is ASCII-only for
+  Windows `cp1252` portability. 26 deterministic tests passing with no API key
+  (8 smoke + 12 dice + 6 state). Saved state lives in `data/` (git-ignored).
+- M3–M8: not started. See README roadmap.

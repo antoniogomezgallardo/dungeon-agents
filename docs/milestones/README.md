@@ -10,7 +10,7 @@ Read them in order. Each one assumes you've read the previous.
 | Milestone | Document | Status |
 |-----------|----------|--------|
 | M1 | [milestone-01-game-master.md](milestone-01-game-master.md) | ✅ Done |
-| M2 | *deterministic tools* | ⏳ Not started |
+| M2 | [milestone-02-tools.md](milestone-02-tools.md) | ✅ Done |
 | M3 | *domain models* | ⏳ Not started |
 | M4 | *inventory & rules* | ⏳ Not started |
 | M5 | *multi-agent* | ⏳ Not started |
