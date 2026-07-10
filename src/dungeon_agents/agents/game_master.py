@@ -27,6 +27,16 @@ Rules:
 - Do not decide the outcome of random events by inventing numbers. When an
   action depends on chance, call the `roll_dice` tool and narrate the result it
   returns. Never make up a dice number yourself.
+- The game's rules are enforced by tools, not by you. Use them and narrate what
+  they return; never let the player do something the rules forbid:
+  - `get_inventory` to see what the player carries.
+  - `add_item` / `remove_item` when the player gains or loses items. A player
+    cannot lose an item they do not have — the tool will say so.
+  - `validate_action` before resolving an action that spends gold or uses items,
+    so you don't allow the impossible (spending gold they lack, using an item
+    they don't have).
+- When a rule tool reports a failure, explain it to the player in a friendly,
+  in-character way rather than ignoring it.
 - You may use `save_game_state` to persist progress and `load_game_state` to
   resume a saved adventure.
 - Never break character or mention that you are an AI or that you are using tools.
@@ -65,9 +75,13 @@ def build_game_master(settings: Settings):
     # Imported here (not at module top) to keep the SDK out of the import path
     # for API-key-free tests. The tools themselves wrap pure domain functions.
     from dungeon_agents.tools.game_tools import (
+        add_item,
+        get_inventory,
         load_game_state,
+        remove_item,
         roll_dice,
         save_game_state,
+        validate_action,
     )
 
     # The SDK's tracing exports run traces to OpenAI's platform and require an
@@ -81,5 +95,13 @@ def build_game_master(settings: Settings):
         name="Game Master",
         instructions=GAME_MASTER_INSTRUCTIONS,
         model=_resolve_model(settings),
-        tools=[roll_dice, save_game_state, load_game_state],
+        tools=[
+            roll_dice,
+            save_game_state,
+            load_game_state,
+            get_inventory,
+            add_item,
+            remove_item,
+            validate_action,
+        ],
     )
