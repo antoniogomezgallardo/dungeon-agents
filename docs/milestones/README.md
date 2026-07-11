@@ -13,7 +13,7 @@ Read them in order. Each one assumes you've read the previous.
 | M2 | [milestone-02-tools.md](milestone-02-tools.md) | ✅ Done |
 | M3 | [milestone-03-domain-models.md](milestone-03-domain-models.md) | ✅ Done |
 | M4 | [milestone-04-inventory-rules.md](milestone-04-inventory-rules.md) | ✅ Done |
-| M5 | *session state & UX* | ⏳ Not started |
+| M5 | [milestone-05-session-ux.md](milestone-05-session-ux.md) | ✅ Done |
 | M6 | *multi-agent* | ⏳ Not started |
 | M7 | *guardrails* | ⏳ Not started |
 | M8 | *evaluation* | ⏳ Not started |

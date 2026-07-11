@@ -88,16 +88,15 @@ pip install -e ".[dev]"
   tests passing with no API key.
 - **M2 — Deterministic tools: DONE.** `domain/` layer (pure Python, zero SDK):
   `dice.py` (`roll_dice`, `InvalidDiceError`, seeded-rng injection) and
-  `state.py` (`save_game_state`, `load_game_state`, `StateError`, bounded writes,
-  JSON validation, `tmp_path` injection). `tools/` layer: thin `@function_tool`
-  wrappers for all three. Game Master wired with `tools=[roll_dice,
-  save_game_state, load_game_state]`; instructions updated to call `roll_dice`
-  for chance. `main.py`: SDK hooks (`RunHooks` subclass) print dim `[tool]`
-  lines for each tool call (observability, not behavior change); startup help
-  panel + `help`/`?`/`/help` meta-command (no game turn consumed); input prompt
-  clarified to show free-text is allowed; all console output is ASCII-only for
-  Windows `cp1252` portability. 26 deterministic tests passing with no API key
-  (8 smoke + 12 dice + 6 state). Saved state lives in `data/` (git-ignored).
+  `state.py` (bounded writes, JSON validation, `tmp_path` injection; originally
+  added free-form `save_game_state`/`load_game_state` functions — retired in M5
+  when the project unified on the validated format). `tools/` layer: thin
+  `@function_tool` wrappers. Game Master wired with `roll_dice` + save/load
+  tools; instructions updated to call `roll_dice` for chance. `main.py`: SDK
+  hooks (`RunHooks` subclass, now debug-mode-gated in M5); startup help panel +
+  `help`/`?`/`/help` meta-command; all console output ASCII-only for Windows
+  `cp1252` portability. 26 deterministic tests passing with no API key (8 smoke +
+  12 dice + 6 state). Saved state lives in `data/` (git-ignored).
 - **M3 — Domain models: DONE.** Five Pydantic models in `domain/models.py` (pure
   Python, zero SDK): `InventoryItem` (name non-empty, quantity ge=1), `Player`
   (name non-empty, hp 0..MAX_HP=100, max_hp ge=1, gold ge=0), `Quest` (title
@@ -107,10 +106,10 @@ pip install -e ".[dev]"
   invalidates the whole state), `ActionResult` (success bool required/no default,
   message, optional new_state). Two new persistence functions in `state.py`:
   `save_state(GameState)` uses `model_dump_json`; `load_state()` uses
-  `model_validate_json` and raises `StateError` on schema mismatch. M2 raw-JSON
-  functions (`save_game_state`, `load_game_state`) kept intact so existing tools
-  are not broken. 49 deterministic tests (8 smoke + 12 dice + 9 state + 20
-  models), all passing without an API key.
+  `model_validate_json` and raises `StateError` on schema mismatch. (M2 raw-JSON
+  functions coexisted at this point; both were retired in M5 when the project
+  unified on the validated format.) 49 deterministic tests (8 smoke + 12 dice +
+  9 state + 20 models), all passing without an API key.
 - **M4 — Inventory & game rules: DONE.** Nine pure rule functions in
   `domain/rules.py` (zero SDK): `get_inventory`, `add_item`, `remove_item`
   (can't remove items you don't have), `spend_gold` (can't overspend), `earn_gold`,
@@ -118,24 +117,48 @@ pip install -e ".[dev]"
   `complete_quest`, `is_game_won`, `is_game_over`. Each takes a `GameState` and
   returns an `ActionResult` (or bool for win/lose); never mutates input
   (`model_copy(deep=True)`). Four new `@function_tool` wrappers in
-  `game_tools.py` → 7 tools total: `get_inventory`, `add_item`, `remove_item`,
-  `validate_action`; all follow load-modify-save via `_load_or_new_state()` /
-  `_apply()`. `_load_or_new_state` seeds a starter game with `Player` + opening
-  `Quest` if no save exists. Game Master instructions updated to enforce rules via
-  tools. `HELP_TEXT` updated with inventory, gold, HP limits, win/lose conditions.
-  78 deterministic tests (8 smoke + 12 dice + 9 state + 20 models + 29 rules),
+  `game_tools.py` → 7 tools total. Game Master instructions updated to enforce
+  rules via tools. `HELP_TEXT` updated with inventory, gold, HP limits, win/lose
+  conditions. 78 deterministic tests (8 smoke + 12 dice + 9 state + 20 models +
+  29 rules), all passing without an API key.
+- **M5 — Session state & UX: DONE.** Five blocks:
+  (A) Persistence unification — retired the M2 free-form JSON save tools
+  (`save_game_state` / `load_game_state`) entirely; unified on the single
+  validated `GameState` schema. Added `load_state_or_none()` (tolerant: returns
+  None for missing OR incompatible saves instead of raising `StateError`) and
+  `clear_state()` (delete save for new game). New tools `save_game` / `load_game`
+  replace the retired M2 tools.
+  (B) Session management — `last_scene: str` field added to `GameState`; persisted
+  after every GM turn; reprinted verbatim on resume (deterministic, not
+  improvised). `Recap` panel shows name/location/HP/gold/quest + session_summary
+  on startup. `RESUME_PROMPT` tells model to continue rather than restart. `new`
+  command discards save and starts fresh.
+  (C) State on demand — `stats`/`status` and `inventory`/`inv` and
+  `summary`/`recap` console meta-commands read validated `GameState` directly
+  (deterministic, never AI-narrated). After every meta-command (except `exit`),
+  last scene is re-shown.
+  (D) Debug mode — `DUNGEON_DEBUG` env var (truthy values: 1/true/yes/on) plus
+  in-game `debug` toggle. `DebugState` mutable holder so already-built hooks see
+  runtime toggles. Enriched `RunHooks`: `on_agent_start` (which agent is
+  working), `on_tool_start` / `on_tool_end` (tool name, args, result, timing in
+  ms). Off by default; clean play stays clean.
+  (E) UX refinements — `_start_new_game()` seeds a fresh `GameState` at game
+  start so stats work from turn 0. `update_summary` tool: GM writes story beats
+  into `session_summary` (persisted, so `summary` command is deterministic).
+  `set_location` and `set_quest` tools sync tracked state to the GM's improvised
+  story.
+  State-sync reliability lesson: with `claude-haiku-4-5`, the GM does not
+  reliably call `set_location`/`set_quest` despite explicit instructions. The code
+  is correct; the model is the variable. Response: show "not set yet" (honest
+  gap) rather than a fabricated template value. KEY LESSON: a prompt pushes
+  probabilities, not guarantees. What MUST happen goes in deterministic code. What
+  depends on the model must fail honestly (visible gap), never deceptively
+  (fabricated value). This is the most important agent lesson in the project and
+  the strongest bridge to TestOps AI.
+  10 tools total (roll_dice, save_game, load_game, get_inventory, add_item,
+  remove_item, validate_action, update_summary, set_location, set_quest).
+  81 deterministic tests (10 smoke + 12 dice + 9 state + 21 models + 29 rules),
   all passing without an API key.
-- **M5 — Session state & UX: IN PROGRESS / not yet built.** Three-part scope:
-  (A) save-format unification — fix the conflict between M2 free-form-JSON save
-  tools and the M3 validated save/load; retire the free-form tools, unify on the
-  validated `GameState` schema, and discard incompatible old saves with a friendly
-  message rather than crashing. (B) session management — allow starting a new
-  game even when a save exists; on load, show a deterministic recap of prior
-  events plus the last scene so the player resumes exactly where they left off;
-  after meta-commands like save/help (except exit) re-show the last scene.
-  (C) state on demand — `stats` and `inventory` commands read HP, gold, inventory,
-  and quest directly from the validated `GameState` (deterministic output, not
-  AI-narrated).
 - M6 — Multi-agent (Game Master, Rules Referee, Inventory Keeper, Lore Keeper,
   Critic): not started.
 - M7 — Guardrails & safety constraints: not started.
