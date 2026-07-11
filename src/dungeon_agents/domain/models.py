@@ -79,8 +79,11 @@ class GameState(BaseModel):
     can never be saved silently (the M3 acceptance criterion).
 
     `active_quest` is optional: a fresh game may have no quest yet.
-    `session_summary` is the concise running recap the Lore Keeper agent will
-    maintain from M5; for now it's just a string the state carries.
+    `session_summary` is a concise running recap of the adventure, shown when a
+    game is resumed. `last_scene` stores the Game Master's most recent narration
+    verbatim, so resuming a saved game can reprint the exact scene the player was
+    on — a deterministic resume (M5), not an improvised one. (From M6 the Lore
+    Keeper agent will maintain the summary; for now the console loop sets both.)
     """
 
     player: Player
@@ -93,6 +96,10 @@ class GameState(BaseModel):
     )
     session_summary: str = Field(
         default="", description="Concise recap of the adventure so far."
+    )
+    last_scene: str = Field(
+        default="",
+        description="The Game Master's most recent scene text, for exact resume.",
     )
 
 

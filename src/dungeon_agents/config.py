@@ -44,6 +44,10 @@ API_KEY_ENV = {
 }
 
 
+# Values that count as "on" for a boolean env var (case-insensitive).
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     """Immutable snapshot of runtime configuration."""
@@ -51,6 +55,7 @@ class Settings:
     provider: str
     api_key: str | None
     model: str
+    debug: bool
 
     @property
     def has_api_key(self) -> bool:
@@ -69,15 +74,19 @@ def load_settings() -> Settings:
     `DUNGEON_PROVIDER` selects the vendor (default: anthropic). An unknown value
     falls back to the default rather than crashing — a safe, predictable default.
     `DUNGEON_MODEL` overrides the per-provider default model if set.
+    `DUNGEON_DEBUG` (1/true/yes/on) starts the game in debug mode, which surfaces
+    what the agent does under the hood (tool calls, timing). Off by default.
     """
     provider = os.getenv("DUNGEON_PROVIDER", DEFAULT_PROVIDER).strip().lower()
     if provider not in DEFAULT_MODELS:
         provider = DEFAULT_PROVIDER
 
     model = os.getenv("DUNGEON_MODEL") or DEFAULT_MODELS[provider]
+    debug = os.getenv("DUNGEON_DEBUG", "").strip().lower() in _TRUTHY
 
     return Settings(
         provider=provider,
         api_key=os.getenv(API_KEY_ENV[provider]),
         model=model,
+        debug=debug,
     )

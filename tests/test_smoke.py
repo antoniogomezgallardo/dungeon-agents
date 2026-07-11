@@ -66,9 +66,23 @@ def test_settings_respects_model_override(monkeypatch) -> None:
 
 def test_has_api_key_flag() -> None:
     """has_api_key reflects whether a key is present."""
-    base = dict(provider=PROVIDER_ANTHROPIC, model="claude-haiku-4-5")
+    base = dict(provider=PROVIDER_ANTHROPIC, model="claude-haiku-4-5", debug=False)
     assert Settings(api_key=None, **base).has_api_key is False
     assert Settings(api_key="sk-x", **base).has_api_key is True
+
+
+def test_debug_flag_off_by_default(monkeypatch) -> None:
+    """Debug mode is off unless DUNGEON_DEBUG is set to a truthy value."""
+    monkeypatch.delenv("DUNGEON_DEBUG", raising=False)
+    assert load_settings().debug is False
+
+
+def test_debug_flag_reads_truthy_env(monkeypatch) -> None:
+    """DUNGEON_DEBUG=1 (or true/yes/on) turns debug mode on."""
+    monkeypatch.setenv("DUNGEON_DEBUG", "1")
+    assert load_settings().debug is True
+    monkeypatch.setenv("DUNGEON_DEBUG", "off")
+    assert load_settings().debug is False
 
 
 def test_game_master_contract_mentions_choices() -> None:

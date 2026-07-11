@@ -18,19 +18,18 @@ from __future__ import annotations
 from agents import function_tool
 
 from dungeon_agents.domain import dice, rules, state
-from dungeon_agents.domain.models import GameState, Player, Quest
+from dungeon_agents.domain.models import ActionResult, GameState, Player, Quest
 
 
 def new_game_state() -> GameState:
-    """Build a fresh starter game: a default hero and an opening quest."""
-    return GameState(
-        player=Player(name="Adventurer"),
-        location="the Broken Wheel Inn",
-        active_quest=Quest(
-            title="Clear the cellar",
-            description="Deal with whatever is lurking in the inn's cellar.",
-        ),
-    )
+    """Build a fresh starter game with a NEUTRAL, undefined setting.
+
+    Location and quest are intentionally left undefined here: the Game Master
+    improvises a unique story each game and fills them in via `set_location` /
+    `set_quest`, so the saved state matches the narration the player actually
+    sees (rather than a hard-coded template that would contradict the story).
+    """
+    return GameState(player=Player(name="Adventurer"))
 
 
 def _load_or_new_state() -> GameState:
@@ -166,3 +165,61 @@ def validate_action(action: str) -> str:
         f"Player has {game.player.gold} gold and {game.player.hp} HP. {summary}\n"
         f"Judge whether this action is possible with those resources: {action}"
     )
+
+
+@function_tool
+def update_summary(summary: str) -> str:
+    """Record a concise running summary of the adventure so far.
+
+    Call this after story-significant moments — accepting or completing a quest,
+    reaching a new place, meeting a key character, a major win or loss — to keep a
+    short recap of the important beats. The summary is shown to the player when
+    they resume a saved game or ask to see it, so write it as a brief factual
+    recap of what has happened (2-4 sentences), not a to-do list. Replace the
+    previous summary with an updated version each time.
+
+    Args:
+        summary: The updated recap of the adventure so far.
+    """
+    game = _load_or_new_state()
+    game.session_summary = summary.strip()
+    return _apply(ActionResult(success=True, message="Summary updated.", new_state=game))
+
+
+@function_tool
+def set_location(location: str) -> str:
+    """Set the player's current location to match your narration.
+
+    Call this whenever you place the player somewhere or they travel — including
+    the very first scene — so the tracked state matches the story the player
+    sees. Use a short place name (e.g. "the Whispering Forest", "Karth's docks").
+
+    Args:
+        location: The player's current location, as a short name.
+    """
+    location = location.strip()
+    if not location:
+        return "A location needs a name."
+    game = _load_or_new_state()
+    game.location = location
+    return _apply(ActionResult(success=True, message=f"Location set to {location}.", new_state=game))
+
+
+@function_tool
+def set_quest(title: str, description: str = "") -> str:
+    """Set (or replace) the player's active quest to match your narration.
+
+    Call this when the player takes on their objective — including the opening
+    quest you introduce — so the tracked quest matches the story. Setting a new
+    quest replaces the previous active one.
+
+    Args:
+        title: A short quest name (e.g. "Recover the stolen relic").
+        description: What the quest asks for (optional, one sentence).
+    """
+    title = title.strip()
+    if not title:
+        return "A quest needs a title."
+    game = _load_or_new_state()
+    game.active_quest = Quest(title=title, description=description.strip())
+    return _apply(ActionResult(success=True, message=f"Quest set: {title}.", new_state=game))
