@@ -28,6 +28,10 @@ STATS_WORDS = {"stats", "status", "/stats"}
 INVENTORY_WORDS = {"inventory", "inv", "/inventory"}
 SUMMARY_WORDS = {"summary", "recap", "/summary"}
 DEBUG_WORDS = {"debug", "/debug"}
+# save/load take an argument ("save battle"), so they are matched by first word.
+SAVE_WORDS = {"save", "/save"}
+LOAD_WORDS = {"load", "/load"}
+SAVES_WORDS = {"saves", "/saves"}  # list named checkpoints
 OPENING_PROMPT = "Begin the adventure. Set an opening scene and offer me my first choices."
 RESUME_PROMPT = (
     "The player is resuming a saved game. Continue the adventure naturally from "
@@ -56,18 +60,21 @@ This is a [bold]free-text[/bold] adventure. On your turn you can:
   offers. Both work - you are never limited to the listed options.
 
 [bold]Commands[/bold] (type these at any time)
-- [cyan]stats[/cyan]      - show your HP, gold, location and quest (exact, from the game state)
-- [cyan]inventory[/cyan]  - show what you're carrying
-- [cyan]summary[/cyan]    - show a recap of the story so far
-- [cyan]help[/cyan]       - show this help (then re-shows your current scene)
-- [cyan]save[/cyan]       - ask the Game Master to save your progress
-- [cyan]new[/cyan]        - discard your saved game and start a fresh adventure
-- [cyan]debug[/cyan]      - toggle debug mode (see the tools/agents at work under the hood)
-- [cyan]exit[/cyan]       - quit the game (your progress is saved as you play)
+- [cyan]stats[/cyan]       - show your HP, gold, location and quest (exact, from the game state)
+- [cyan]inventory[/cyan]   - show what you're carrying
+- [cyan]summary[/cyan]     - show a recap of the story so far
+- [cyan]help[/cyan]        - show this help (then re-shows your current scene)
+- [cyan]save <name>[/cyan] - save a named checkpoint you can return to exactly
+- [cyan]load <name>[/cyan] - restore a named checkpoint (state and story)
+- [cyan]saves[/cyan]       - list your named checkpoints
+- [cyan]new[/cyan]         - discard your game and start fresh (asks to confirm)
+- [cyan]debug[/cyan]       - toggle debug mode (see the tools/agents at work under the hood)
+- [cyan]exit[/cyan]        - quit the game (your progress is saved as you play)
 
-Your progress is saved automatically. When you start the game with a saved
-adventure, it resumes exactly where you left off - a short recap plus the last
-scene you were on.
+Your progress is saved automatically as you play - you never lose your place.
+When you start the game with a saved adventure, it asks whether to continue it or
+start fresh, and continuing resumes exactly where you left off. Use [cyan]save
+<name>[/cyan] to bookmark a specific moment you can [cyan]load[/cyan] later.
 
 [bold]Your character, inventory and gold[/bold]
 Your character now has real, rule-backed stats. Try things like:
@@ -163,6 +170,47 @@ def _start_new_game() -> None:
     from dungeon_agents.tools.game_tools import new_game_state
 
     game_state.save_state(new_game_state())
+
+
+def _confirm(question: str) -> bool:
+    """Ask a yes/no question at the console; default is No (safe for destructive ops).
+
+    Returns True only on an explicit yes. EOF/Ctrl+C counts as No so an
+    accidental interrupt never triggers a destructive action.
+    """
+    try:
+        answer = console.input(f"[yellow]{question} [dim](y/N)[/dim]: [/yellow]").strip()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return answer.lower() in {"y", "yes"}
+
+
+def _save_checkpoint(name: str, conversation: list) -> None:
+    """Save a named checkpoint (current state + conversation) from the console."""
+    from dungeon_agents.domain.models import SaveSlot
+    from dungeon_agents.domain.state import StateError
+
+    state = game_state.load_state_or_none()
+    if state is None:
+        console.print("[dim]Nothing to save yet - take an action first.[/dim]")
+        return
+    try:
+        slot = SaveSlot(name=name, state=state, conversation=conversation)
+        msg = game_state.save_checkpoint(slot)
+    except StateError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return
+    console.print(f"[dim]{msg}[/dim]")
+
+
+def _list_checkpoints() -> None:
+    """Print the names of saved checkpoints, or a note if there are none."""
+    names = game_state.list_checkpoints()
+    if not names:
+        console.print("[dim]No saved checkpoints yet. Use [cyan]save <name>[/cyan].[/dim]")
+        return
+    listed = "\n".join(f"- {n}" for n in names)
+    console.print(Panel(listed, title="Saved checkpoints", border_style="blue"))
 
 
 def _remember_last_scene(scene: str) -> None:
@@ -285,6 +333,51 @@ def _review_scene(critic, runner, scene: str, debug: DebugState) -> str | None:
     return None
 
 
+def _play_turn(game_master, critic, runner, conversation, debug, tool_hooks):
+    """Run ONE game turn: generate a scene, review it, show it, persist it.
+
+    This is the model-driven part of a turn — the only place that calls the Game
+    Master and the Critic. It is invoked for the opening scene and after a real
+    player action, but NOT for meta-commands (stats/inventory/help/...), which are
+    pure state reads and must never spend a model call or re-run the Critic.
+
+    The Critic reviews the scene against the tracked state before the player sees
+    it; on a contradiction the Game Master regenerates, bounded by
+    MAX_SCENE_RETRIES so a stubborn Critic can never hang the turn.
+
+    Returns (scene, next_conversation, outcome), where outcome is "won"/"lost" or
+    None. The caller shows the end-of-game panel and stops when outcome is set.
+    """
+    result = runner.run_sync(game_master, conversation, hooks=tool_hooks)
+    for _ in range(MAX_SCENE_RETRIES):
+        problem = _review_scene(critic, runner, result.final_output, debug)
+        if problem is None:
+            break  # scene is consistent — show it
+        if debug.enabled:
+            console.print(
+                f"[dim][debug] regenerating scene (Critic: {problem})[/dim]"
+            )
+        # Feed the problem back and regenerate from the same context.
+        retry_input = result.to_input_list() + [
+            {
+                "role": "user",
+                "content": (
+                    "A consistency check flagged your last scene: "
+                    f"{problem}. Rewrite the scene so it matches the tracked "
+                    "game state, keeping the same intent and choices."
+                ),
+            }
+        ]
+        result = runner.run_sync(game_master, retry_input, hooks=tool_hooks)
+
+    scene = result.final_output
+    _print_scene(scene)
+    _remember_last_scene(scene)  # persist for a deterministic resume
+    # End-of-game is decided by tested rules over the validated state, not by the
+    # narration. The caller announces it and stops when this is set.
+    return scene, result.to_input_list(), _check_end_of_game()
+
+
 def _resume_banner(state) -> None:
     """Print the deterministic recap + last scene when resuming a saved game."""
     p = state.player
@@ -400,62 +493,66 @@ def run() -> None:
     # Show the full how-to-play once up front so a new player isn't lost.
     _print_help()
 
-    # If a valid save exists, resume it: show the deterministic recap + the exact
-    # last scene, and tell the model to continue rather than restart. Otherwise
-    # begin a fresh adventure — and seed a starter GameState immediately so that
-    # stats/inventory show sensible defaults from turn 0 (never "no character
-    # yet"). `_last_scene` tracks what to re-show after a meta-command so the
-    # player never loses their place.
+    # Startup choice. If a saved game exists, ask whether to continue it or start
+    # a fresh one (starting fresh discards the current game, so we confirm first).
+    # With no save, jump straight into a new adventure — no menu to slow down a
+    # first-time player. `_last_scene` tracks what to re-show after a meta-command
+    # so the player never loses their place.
     saved = game_state.load_state_or_none()
+    resuming = False
     if saved is not None:
+        console.print(
+            Panel(
+                "A saved adventure was found.\n"
+                "Type [cyan]continue[/cyan] to resume it, or [cyan]new[/cyan] to "
+                "start over.",
+                title="Welcome back",
+                border_style="green",
+            )
+        )
+        choice = ""
+        while choice not in {"continue", "c", "new", "n"}:
+            try:
+                choice = console.input(
+                    "[bold cyan]Load saved game?[/bold cyan] [dim](continue/new)[/dim]: "
+                ).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                console.print("\n[dim]Farewell, adventurer.[/dim]")
+                return
+        if choice in {"continue", "c"}:
+            resuming = True
+
+    if resuming:
         _resume_banner(saved)
         conversation: list = [{"role": "user", "content": RESUME_PROMPT}]
         _last_scene = saved.last_scene
     else:
-        _start_new_game()
-        conversation = [{"role": "user", "content": OPENING_PROMPT}]
-        _last_scene = ""
+        # Starting fresh: if there was a save, confirm before discarding it.
+        if saved is not None and not _confirm(
+            "Start a new adventure? Your current game will be lost."
+        ):
+            # Player backed out — resume the existing game instead of losing it.
+            _resume_banner(saved)
+            conversation = [{"role": "user", "content": RESUME_PROMPT}]
+            _last_scene = saved.last_scene
+        else:
+            game_state.clear_state()  # discard the old game explicitly
+            _start_new_game()
+            conversation = [{"role": "user", "content": OPENING_PROMPT}]
+            _last_scene = ""
+
+    # Play the opening scene once, up front. From here on the loop only generates
+    # a new scene in response to a real player ACTION — meta-commands (stats,
+    # inventory, help, ...) are pure state reads that re-show the current scene
+    # without spending a model call or re-running the Critic.
+    _last_scene, conversation, outcome = _play_turn(
+        game_master, critic, Runner, conversation, debug, tool_hooks
+    )
+    if outcome is not None:
+        _print_end_of_game(outcome)
+        return
 
     while True:
-        # Generate the scene, then have the Critic review it against the tracked
-        # state before the player sees it. If it finds a contradiction, ask the
-        # Game Master to regenerate — a self-repair loop, bounded by
-        # MAX_SCENE_RETRIES so a stubborn Critic can never hang the turn.
-        result = Runner.run_sync(game_master, conversation, hooks=tool_hooks)
-        for _ in range(MAX_SCENE_RETRIES):
-            problem = _review_scene(critic, Runner, result.final_output, debug)
-            if problem is None:
-                break  # scene is consistent — show it
-            if debug.enabled:
-                console.print(
-                    f"[dim][debug] regenerating scene (Critic: {problem})[/dim]"
-                )
-            # Feed the problem back and regenerate from the same context.
-            retry_input = result.to_input_list() + [
-                {
-                    "role": "user",
-                    "content": (
-                        "A consistency check flagged your last scene: "
-                        f"{problem}. Rewrite the scene so it matches the tracked "
-                        "game state, keeping the same intent and choices."
-                    ),
-                }
-            ]
-            result = Runner.run_sync(game_master, retry_input, hooks=tool_hooks)
-
-        _last_scene = result.final_output
-        _print_scene(_last_scene)
-        _remember_last_scene(_last_scene)  # persist for a deterministic resume
-        # Carry the full history forward so the next turn keeps context.
-        conversation = result.to_input_list()
-
-        # End-of-game is decided by tested rules over the validated state, not by
-        # the narration. If the hero has won or fallen, announce it and stop.
-        outcome = _check_end_of_game()
-        if outcome is not None:
-            _print_end_of_game(outcome)
-            return
-
         try:
             # The label hints that free-form actions are allowed, not just the
             # numbered choices the Game Master lists.
@@ -477,12 +574,24 @@ def run() -> None:
                 _print_scene(_last_scene)
             continue
         if player_input.lower() in NEW_WORDS:
-            # Start a fresh game: reset to a seeded starter state (so stats/
-            # inventory work right away) and reset the conversation.
+            # Starting fresh discards the current game — confirm first.
+            if not _confirm("Start a new adventure? Your current game will be lost."):
+                console.print("[dim]Keeping your current adventure.[/dim]")
+                if _last_scene:
+                    _print_scene(_last_scene)
+                continue
+            # Reset to a seeded starter state (so stats/inventory work right away),
+            # then play a fresh opening scene.
+            game_state.clear_state()
             _start_new_game()
-            _last_scene = ""
             console.print("[dim]Starting a new adventure...[/dim]")
             conversation = [{"role": "user", "content": OPENING_PROMPT}]
+            _last_scene, conversation, outcome = _play_turn(
+                game_master, critic, Runner, conversation, debug, tool_hooks
+            )
+            if outcome is not None:
+                _print_end_of_game(outcome)
+                return
             continue
         if player_input.lower() in STATS_WORDS:
             # Meta-command: show deterministic stats, then re-show the scene.
@@ -508,10 +617,57 @@ def run() -> None:
                 f"[dim]Debug mode {'ON' if debug.enabled else 'OFF'}.[/dim]"
             )
             continue
+        # save/load take a name argument ("save battle"), so match on first word.
+        first_word = player_input.split(maxsplit=1)[0].lower() if player_input else ""
+        if first_word in SAVES_WORDS:
+            # List named checkpoints, then re-show the scene.
+            _list_checkpoints()
+            if _last_scene:
+                _print_scene(_last_scene)
+            continue
+        if first_word in SAVE_WORDS:
+            # Save a named checkpoint: current state + conversation, restored exactly.
+            parts = player_input.split(maxsplit=1)
+            if len(parts) < 2 or not parts[1].strip():
+                console.print("[dim]Usage: [cyan]save <name>[/cyan] (e.g. save battle).[/dim]")
+            else:
+                _save_checkpoint(parts[1].strip(), conversation)
+            if _last_scene:
+                _print_scene(_last_scene)
+            continue
+        if first_word in LOAD_WORDS:
+            # Load a named checkpoint: restore state AND conversation exactly.
+            parts = player_input.split(maxsplit=1)
+            if len(parts) < 2 or not parts[1].strip():
+                console.print("[dim]Usage: [cyan]load <name>[/cyan]. See [cyan]saves[/cyan].[/dim]")
+                continue
+            slot = game_state.load_checkpoint(parts[1].strip())
+            if slot is None:
+                console.print(
+                    f"[dim]No checkpoint named '{parts[1].strip()}' "
+                    "(or it was incompatible).[/dim]"
+                )
+                continue
+            # Restore: make this checkpoint the current game and resume its exact
+            # conversation, so the Game Master keeps its full memory.
+            game_state.save_state(slot.state)
+            conversation = slot.conversation or [{"role": "user", "content": RESUME_PROMPT}]
+            _last_scene = slot.state.last_scene
+            console.print(f"[dim]Loaded checkpoint '{slot.name}'.[/dim]")
+            _resume_banner(slot.state)
+            continue
         if not player_input:
             continue
 
+        # A real action: add it to the history and play a turn (GM + Critic).
+        # This is the ONLY place a player action triggers scene generation.
         conversation.append({"role": "user", "content": player_input})
+        _last_scene, conversation, outcome = _play_turn(
+            game_master, critic, Runner, conversation, debug, tool_hooks
+        )
+        if outcome is not None:
+            _print_end_of_game(outcome)
+            return
 
 
 def main() -> None:
