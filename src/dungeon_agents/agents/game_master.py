@@ -153,7 +153,7 @@ def build_game_master(settings: Settings):
         name="Game Master",
         instructions=GAME_MASTER_INSTRUCTIONS,
         model=_resolve_model(settings),
-        input_guardrails=[build_injection_guardrail()],
+        input_guardrails=[build_injection_guardrail(settings)],
         tools=[
             rules_referee_tool,  # <-- the Rules Referee agent, exposed as a tool
             lore_keeper_tool,    # <-- the Lore Keeper agent, exposed as a tool
