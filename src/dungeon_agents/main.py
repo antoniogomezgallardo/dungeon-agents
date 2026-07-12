@@ -180,6 +180,60 @@ def _remember_last_scene(scene: str) -> None:
     game_state.save_state(current)
 
 
+def _check_end_of_game(state=None):
+    """Return an end-of-game outcome from the validated state, or None.
+
+    Deterministic: victory and defeat are decided by tested rules over the
+    GameState (`is_game_won` / `is_game_over`), never by the narrator. The Game
+    Master may describe a dramatic fall, but whether the game is actually OVER is
+    read from the tracked HP and quest — the last and clearest application of the
+    project's core rule that outcomes live in code, not in the story.
+
+    Args:
+        state: The GameState to judge. Defaults to the saved state (what the game
+            loop uses); tests inject one directly for deterministic checks.
+
+    Returns one of "won", "lost", or None (game continues). "lost" takes
+    precedence: a fallen hero can't also have just won.
+    """
+    from dungeon_agents.domain import rules
+
+    if state is None:
+        state = game_state.load_state_or_none()
+    if state is None:
+        return None
+    if rules.is_game_over(state):
+        return "lost"
+    if rules.is_game_won(state):
+        return "won"
+    return None
+
+
+def _print_end_of_game(outcome: str) -> None:
+    """Print the win/lose panel that ends the adventure."""
+    if outcome == "won":
+        console.print(
+            Panel(
+                "[bold]Victory![/bold] You have completed your quest. "
+                "Your adventure ends in triumph.",
+                title="The End",
+                border_style="green",
+            )
+        )
+    else:  # "lost"
+        console.print(
+            Panel(
+                "[bold]You have fallen.[/bold] Your HP reached 0 and your "
+                "adventure ends here.",
+                title="Game Over",
+                border_style="red",
+            )
+        )
+    console.print(
+        "[dim]Type [cyan]new[/cyan] next time to begin a fresh adventure.[/dim]"
+    )
+
+
 def _state_for_review() -> str:
     """Build a compact, factual snapshot of the tracked state for the Critic.
 
@@ -394,6 +448,13 @@ def run() -> None:
         _remember_last_scene(_last_scene)  # persist for a deterministic resume
         # Carry the full history forward so the next turn keeps context.
         conversation = result.to_input_list()
+
+        # End-of-game is decided by tested rules over the validated state, not by
+        # the narration. If the hero has won or fallen, announce it and stop.
+        outcome = _check_end_of_game()
+        if outcome is not None:
+            _print_end_of_game(outcome)
+            return
 
         try:
             # The label hints that free-form actions are allowed, not just the
