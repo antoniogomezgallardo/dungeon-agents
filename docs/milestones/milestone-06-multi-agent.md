@@ -1,8 +1,8 @@
 # Milestone 6 — Multi-Agent Architecture
 
-> **Status:** In progress — Blocks 1 and 2 complete (Game Master + Rules Referee,
-> persistence fix, and skill-check mechanic). Blocks for Inventory Keeper, Lore
-> Keeper, and Critic remain.
+> **Status:** In progress — Blocks 1, 2, and 3 complete (Game Master + Rules
+> Referee + Lore Keeper, persistence fix, and skill-check mechanic). Blocks for
+> Inventory Keeper and Critic remain.
 >
 > **Theme:** Specialization + coordination produce reliability that a single
 > agent with a longer prompt never can. The model orchestrates; the code verifies.
@@ -28,16 +28,18 @@ M6 replaces the do-everything Game Master with a **team of specialist agents**:
 |-------|---------------|
 | **Game Master** | Narrates the story and orchestrates the others |
 | **Rules Referee** | Arbitrates: is this action allowed? What is its outcome? |
+| **Lore Keeper** | Keeps tracked world state (location, quest, summary) in sync with the story |
 | Inventory Keeper | Tracks and reports what the player carries (future block) |
-| Lore Keeper | Maintains session summaries and scene history (future block) |
 | Critic | Reviews GM output for consistency and tone (future block) |
 
-This document covers **Blocks 1 and 2**. Block 1 introduced the Rules Referee
-and the agent-as-tool coordination pattern. Block 2 — driven by the user playing
-the game and noticing concrete failures — fixed two mechanical gaps: gold and HP
-changes were never persisted to disk, and a bare dice roll had no mechanical
-weight because the model decided what the number meant. The remaining agents will
-be documented as they are built.
+This document covers **Blocks 1, 2, and 3**. Block 1 introduced the Rules
+Referee and the agent-as-tool coordination pattern. Block 2 — driven by the user
+playing the game and noticing concrete failures — fixed two mechanical gaps: gold
+and HP changes were never persisted to disk, and a bare dice roll had no
+mechanical weight because the model decided what the number meant. Block 3
+introduced the Lore Keeper, the second specialist agent, which owns narrative
+world-state sync and reinforces the specialization principle with a second data
+point. The remaining agents will be documented as they are built.
 
 The `domain/` layer — rules, models, state, dice — is unchanged. Every function
 built in M1–M5 is the stable tested foundation that the multi-agent layer runs on
@@ -46,9 +48,9 @@ out of agents.
 
 ---
 
-## 2. What was built — Block 1
+## 2. What was built — Blocks 1, 2, and 3
 
-### 2.1 The Rules Referee — a second agent with a narrow job
+### 2.1 Block 1 — The Rules Referee: a second agent with a narrow job
 
 `agents/rules_referee.py` introduces the project's first specialist agent. Its
 contract is written at the top of the file:
@@ -81,15 +83,15 @@ tidiness — it is a testability decision. A Referee that cannot call `add_item`
 are rulings: structured text, not side effects. That makes testing its behavior
 tractable without a live model call (section 5).
 
-### 2.2 The Game Master becomes an orchestrator
+### 2.2 Block 1 — The Game Master becomes an orchestrator
 
-`build_game_master()` (`agents/game_master.py:82`) now has a clear two-part
+`build_game_master()` (`agents/game_master.py:80`) now has a clear two-part
 structure:
 
 1. Build the Rules Referee.
 2. Expose the Referee to the Game Master as a tool via `.as_tool(...)`.
 
-The wiring is at `agents/game_master.py:126–134`:
+The wiring is at `agents/game_master.py:125–133`:
 
 ```python
 referee = build_rules_referee(settings)
@@ -104,7 +106,7 @@ rules_referee_tool = referee.as_tool(
 ```
 
 `rules_referee_tool` then appears as the first entry in the Game Master's tool
-list (`agents/game_master.py:141`), alongside the narration and state-sync tools.
+list (`agents/game_master.py:153`), alongside the narration and state-sync tools.
 From the Game Master's perspective, the Referee is just another tool — a callable
 that takes a description of an action and returns a structured ruling.
 
@@ -122,20 +124,25 @@ Two tools that the Game Master held before M6 — `roll_dice` and `validate_acti
 asks the Referee, which does it. The Referee's `check_can_afford` replaces
 `validate_action` entirely (section 2.4).
 
-### 2.3 Tool count after Block 2
+### 2.3 Block 2 — Tool count after persistence fixes
+
+After Block 2, the tool assignments were:
 
 | Agent | Tools |
 |-------|-------|
 | Game Master | `rules_referee` (the Referee as tool), `save_game`, `load_game`, `get_inventory`, `add_item`, `remove_item`, `update_summary`, `set_location`, `set_quest` (9 total) |
 | Rules Referee | `skill_check`, `roll_dice`, `check_can_afford`, `earn_gold`, `spend_gold`, `change_hp` (6 total) |
 
-The total tool count visible to the system is 15, but the GM sees 9 and the
-Referee sees 6. Specialization means narrowing, not growing. The Referee grew
+The total tool count visible to the system was 15, but the GM saw 9 and the
+Referee saw 6. Specialization means narrowing, not growing. The Referee grew
 from 2 to 6 tools in Block 2 because arbitrating an outcome now includes
 persisting its consequences — those four tools are not narration tools, they are
 the completion of the Referee's single job.
 
-### 2.4 Design decision: `validate_action` retired, `check_can_afford` introduced
+Block 3 revised this table: see section 2.7 for the current tool assignments
+after the Lore Keeper was introduced.
+
+### 2.4 Block 1 — Design decision: `validate_action` retired, `check_can_afford` introduced
 
 `validate_action` existed in M4–M5. Its name implied deterministic validation but
 its implementation delegated the decision to the model: it returned a prompt
@@ -185,7 +192,7 @@ This is the same "AI orchestrates, code verifies" pattern applied one level deep
 now the code inside the Referee's tools — not just the GM's tools — does the
 deciding.
 
-### 2.5 Block 2 — Bug fix: gold and HP changes were never persisted
+### 2.5 Block 2 — Bug fix: gold and HP changes were never persisted to disk
 
 This fix, like the `validate_action` retirement, was identified because the user
 played the game. The symptom: after earning a reward or taking damage in combat,
@@ -326,6 +333,156 @@ bool` is the verdict; narration follows from both.
 Given the same seed and difficulty, the outcome is always identical —
 reproducibility under test, real randomness in play.
 
+### 2.7 Block 3 — The Lore Keeper: the third agent and the narrative boundary
+
+`agents/lore_keeper.py` introduces the project's third specialist agent. Its
+docstring names the division of labor that drives its existence:
+
+> "Where the Referee owns the *mechanical* state (dice, gold, HP), the Lore
+> Keeper owns the *narrative* state: keeping the tracked location, quest, and
+> running summary in sync with the story the Game Master tells."
+> (`agents/lore_keeper.py:4–7`)
+
+This is a deliberate **boundary of responsibilities** between two specialists:
+
+| Specialist | Owns | Cannot touch |
+|------------|------|--------------|
+| Rules Referee | Dice, gold, HP — the numbers | Location, quest, summary — the story |
+| Lore Keeper | Location, quest, session_summary — the story | Dice, gold, HP, items — the numbers |
+
+Neither specialist crosses that line. `LORE_KEEPER_INSTRUCTIONS`
+(`agents/lore_keeper.py:31`) states the hard limits verbatim:
+
+> "Do NOT roll dice, change gold or HP, or add/remove items — that is the Rules
+> Referee's and the Game Master's job, not yours."
+
+The contract tests in `tests/test_lore_keeper.py:30–36` verify this boundary is
+encoded in the instructions without touching a live model.
+
+**Why this agent exists — the M5 failure addressed structurally.**
+
+In M5 the single Game Master was responsible for narrating, tracking rules,
+managing inventory, and syncing `set_location` / `set_quest` / `update_summary`
+after each turn. The code for those tools was correct. The model was the weak
+link: a prompt with competing instructions attended to each instruction with
+whatever attention remained after the others. `set_location` and `set_quest`
+were low-salience steps — often skipped.
+
+The Lore Keeper attacks this structurally rather than by prompting harder. A
+dedicated agent with a single focused instruction and only four tools has no
+competing attention pull. The game master's docstring (`agents/lore_keeper.py:12`)
+is precise about what this achieves and what it does not:
+
+> "...raises the probability it gets done. It does not GUARANTEE it (a prompt
+> pushes probability, not certainty): if the Game Master forgets to consult the
+> Lore Keeper, stats simply show 'not set yet' — the honest gap from M5, never
+> a fabricated value."
+
+This is the specialization principle confirmed by a second data point: one agent
+per job raises per-job reliability. The same observation drove the Rules Referee
+(Block 1). The Lore Keeper is the second instance of the pattern, and makes it
+a pattern rather than an accident.
+
+`build_lore_keeper()` (`agents/lore_keeper.py:66`) constructs the agent with
+exactly four tools: `set_location`, `set_quest`, `update_summary`, and
+`get_inventory` (read-only; used when composing an accurate summary). It
+deliberately receives none of the Referee's tools and none of the GM's narration
+tools. The tool surface matches the job surface.
+
+### 2.8 Block 3 — Game Master wired as orchestrator of three agents
+
+`build_game_master()` (`agents/game_master.py:80`) now has a clear three-part
+structure: build the Referee, build the Lore Keeper, expose both as tools, then
+construct the GM with both tools in its list.
+
+The Lore Keeper wiring mirrors the Referee's exactly (`agents/game_master.py:138–146`):
+
+```python
+lore_keeper = build_lore_keeper(settings)
+lore_keeper_tool = lore_keeper.as_tool(
+    tool_name="lore_keeper",
+    tool_description=(
+        "Consult the Lore Keeper to keep the tracked world in sync with the "
+        "story. Give it the current scene or development; it updates the "
+        "location, quest, and running summary to match."
+    ),
+)
+```
+
+The agent-as-tool pattern is applied identically to a second specialist —
+deliberately, before introducing a different pattern with the Critic. Repeating
+the same pattern with a second agent has value: it proves the pattern is
+composable (you add an agent by adding one build call and one `.as_tool()` entry;
+no other code changes), and it lets the Critic's different pattern (pipeline) stand
+out clearly by contrast when it arrives.
+
+`GAME_MASTER_INSTRUCTIONS` (`agents/game_master.py:16`) was updated to delegate
+world-sync to the Lore Keeper rather than calling `set_location` / `set_quest` /
+`update_summary` directly:
+
+> "Keep the tracked world state in sync with your story. The player can open a
+> stats screen that reads this tracked state, so it should match your narration.
+> You do NOT update it yourself — the Lore Keeper does: Consult the `lore_keeper`
+> tool whenever the world changes..."
+> (`agents/game_master.py:26–35`)
+
+Three tools that the Game Master held before Block 3 — `set_location`,
+`set_quest`, and `update_summary` — are no longer in its tool list. The note in
+`build_game_master()` makes the migration explicit (`agents/game_master.py:100–101`):
+
+```python
+# Note: set_location / set_quest / update_summary are NOT here anymore — they
+# moved to the Lore Keeper, which now owns narrative-state sync.
+```
+
+**Design decision: agent-as-tool over a deterministic pipeline step.**
+
+An alternative worth recording: instead of asking the GM to consult the Lore
+Keeper (which the GM may or may not do, depending on its next prediction), the
+code could call `lore_keeper.run(scene_text)` unconditionally after every GM
+turn — a deterministic pipeline step that guarantees the sync happens.
+
+This alternative was rejected for three reasons.
+
+First, if the sync must be guaranteed, an LLM is the wrong tool. A pipeline step
+that calls a language model to sync location/quest deterministically is using an
+LLM for what code does better: write a fixed value to a field. The moment you
+need a guarantee, the answer is Python, not a prompt. The Lore Keeper adds value
+precisely because it exercises _judgment_ about what is narratively significant
+— "is this a new location? which quest is now active?" — and that judgment is
+exactly what a language model handles well. Guarantee the _decision to sync_; do
+not guarantee the _judgment_ that drives what gets synced.
+
+Second, the honest-gap principle applies. If the GM never calls the Lore Keeper,
+`stats` shows "not set yet" — a visible, correct gap. That gap is informative: it
+tells you the GM skipped the consultation. A mandatory pipeline step would hide
+this omission, because the Lore Keeper would be called even when the GM's scene
+has nothing new to sync. The gap's visibility is a feature, not a failure.
+
+Third, a mandatory call adds a model invocation per turn even on turns where
+nothing changed — wasted latency and cost. The agent-as-tool pattern calls the
+Lore Keeper only when the GM judges it appropriate, which is the right behavior
+for a well-functioning orchestration.
+
+The deeper principle: **use an agent for what requires judgment; use code for
+what requires a guarantee**. Reliability that matters — like spending a negative
+amount of gold — goes in deterministic Python. Reliability we want but can live
+without guaranteeing — like syncing the location label — goes in a focused agent,
+and we measure its compliance rate as a QA metric. That measurement is M8's job.
+
+**Tool count after Block 3.**
+
+| Agent | Tools |
+|-------|-------|
+| Game Master | `rules_referee` (as tool), `lore_keeper` (as tool), `save_game`, `load_game`, `get_inventory`, `add_item`, `remove_item` (7 direct tools + 2 agent-as-tool = 9 entries) |
+| Rules Referee | `skill_check`, `roll_dice`, `check_can_afford`, `earn_gold`, `spend_gold`, `change_hp` (6 total) |
+| Lore Keeper | `set_location`, `set_quest`, `update_summary`, `get_inventory` (4 total) |
+
+The GM's direct tool count decreased from 9 (Block 2) to 7 (Block 3): three
+narrative-state tools migrated to the Lore Keeper, and in exchange the Lore
+Keeper appears as one new agent-as-tool entry. The system's total tool surface
+is now 19 across three agents, but each agent sees only what its job requires.
+
 ---
 
 ## 3. Concepts learned — multi-agent coordination patterns
@@ -343,15 +500,25 @@ loop), then returns its final text output as the tool result. Control **returns 
 the orchestrator** after every call.
 
 In M6: the Game Master is the orchestrator. The Rules Referee is called via
-`rules_referee_tool`. When the GM calls `rules_referee("the player tries to climb
-the wall")`, the Referee runs its internal loop — possibly rolling dice, possibly
-checking affordability — and returns a ruling. The GM receives that ruling as a
-tool result and narrates around it. The GM never gave up control.
+`rules_referee_tool` for contested outcomes; the Lore Keeper is called via
+`lore_keeper_tool` for world-state sync. When the GM calls `rules_referee("the
+player tries to climb the wall")`, the Referee runs its internal loop — possibly
+rolling dice, possibly checking affordability — and returns a ruling. When the GM
+calls `lore_keeper("player arrived at the Whispering Forest on a rescue quest")`,
+the Lore Keeper calls `set_location`, `set_quest`, and `update_summary` as
+appropriate and returns a short confirmation. In both cases the GM receives the
+result as a tool result and retains control.
+
+Block 3 demonstrates that the pattern is **composable**: adding a second
+specialist required one build call, one `.as_tool()` call, and one entry in the
+GM's tool list — no restructuring of the game loop, no new Runner invocations. A
+third specialist (Inventory Keeper) and a fourth (Critic) can follow the same
+path, or introduce a different pattern (section 3.3) when warranted.
 
 The critical property: **a single, auditable thread of decisions**. From the
-outside, one agent drove the turn. Inside that turn, a specialist was consulted.
-The trace in debug mode shows a single conversation thread with a nested
-sub-invocation.
+outside, one agent drove the turn. Inside that turn, two specialists may have
+been consulted. The trace in debug mode shows a single conversation thread with
+nested sub-invocations.
 
 ### 3.2 Pattern 2 — Handoff (transfer of control)
 
@@ -370,8 +537,9 @@ hands off to the Referee, and the Referee's ruling becomes the player's output �
 no narration, no story. That is wrong for this use case. The GM must always
 narrate. Hence handoffs were not used here.
 
-Handoffs will likely appear in M6 future blocks if the Lore Keeper or Critic
-should produce a complete response independently. For now they remain unused.
+Handoffs will likely appear in M6 future blocks if the Critic should produce a
+complete response independently (e.g. when the GM's output is rejected and the
+Critic's revised scene is the final output). For now they remain unused.
 
 ### 3.3 Pattern 3 — Pipeline / review chain
 
@@ -487,13 +655,26 @@ periodically fail at one of them.
 Giving each job to an agent with a narrow prompt and only the tools that job needs
 is not about distributing load — the model capacity per agent call is the same. It
 is about reducing competition for attention within each call. The Referee, asked
-only to arbitrate and given only `roll_dice` and `check_can_afford`, has no
-competing instructions. It cannot accidentally narrate (the instructions
-explicitly forbid it), and it cannot accidentally mutate state (it has no mutation
-tools).
+only to arbitrate and given only `roll_dice` and `check_can_afford` (Block 1),
+has no competing instructions. It cannot accidentally narrate (the instructions
+explicitly forbid it), and it cannot accidentally mutate location or summary state
+(it has none of those tools). The Lore Keeper (Block 3) is the mirror image on
+the narrative side: asked only to sync world state and given only four tools, it
+cannot accidentally roll dice or spend gold.
+
+Two specialists with a clean boundary between them make each other's scope
+smaller. This is why the boundary matters (section 2.7): the Referee's
+prohibition on narration and the Lore Keeper's prohibition on dice/resources are
+not politeness — they are the mechanism by which each agent's attention is
+preserved for its own job.
 
 This is why "a larger model" is not the answer to reliability problems in a
-multi-tool agent. The answer is narrow scope.
+multi-tool agent. The answer is narrow scope — and the narrower the scope, the
+more measurable the reliability. Whether the Lore Keeper actually calls
+`set_location` when a new place is reached is a number: a compliance rate. M8
+will measure it. If it proves poor, the escalation path is to make the sync
+deterministic in code — because at that point you know you needed a guarantee, not
+a probability.
 
 ### 4.4 Structured contracts between agents reduce ambiguity
 
@@ -627,13 +808,38 @@ These tests are the specification for the mechanic. If `resolve_check` ever drif
 — if, say, someone changes `>=` to `>` and breaks the boundary case — the seeded
 tests catch it immediately without running the game.
 
-**`on_agent_start` debug output now names two agents.**
+**Lore Keeper contract tests follow the same API-key-free pattern.**
+
+`tests/test_lore_keeper.py` adds five contract tests, all running without an
+API key or a live model. They assert on `LORE_KEEPER_INSTRUCTIONS` and
+`GAME_MASTER_INSTRUCTIONS`:
+
+- The Lore Keeper's instructions exist and are non-trivial.
+- The instructions name all three sync tools (`set_location`, `set_quest`,
+  `update_summary`).
+- The hard-limits section contains "do not narrate" and "do not roll dice" —
+  the boundary that keeps the Lore Keeper from stepping on the Referee's job.
+- The honest-gap clause appears: "not set yet" and an explicit instruction not
+  to invent values the story did not establish.
+- The GM's instructions now delegate world-sync through the `lore_keeper` tool
+  and say "not update it yourself" — the GM's behavioral contract reflects the
+  migration.
+
+These are the same kind of behavioral contract tests as the Referee's
+(`tests/test_rules_referee.py`). The pattern is now established across two
+specialist agents: the contract is a string constant; string constants are
+testable without a model call; the test suite can prove the behavioral commitment
+without running the game.
+
+**`on_agent_start` debug output now names three agents.**
 
 The `ToolActivityHooks` in `main.py` already printed `[debug] agent X is
 working...` in M5 (when there was only one agent). In M6, debug mode shows which
-agent is active per sub-invocation: the Game Master's `on_agent_start` fires, then
-the Referee's fires when the GM calls the `rules_referee` tool. The observability
-seam built in M5 now earns its value.
+agent is active per sub-invocation: the Game Master's `on_agent_start` fires,
+then the Referee's fires when the GM calls `rules_referee`, and the Lore Keeper's
+fires when the GM calls `lore_keeper`. A turn that triggers both specialists
+produces three `[debug] agent ... is working...` lines. The observability seam
+built in M5 now covers the full three-agent system.
 
 ---
 
@@ -642,13 +848,17 @@ seam built in M5 now earns its value.
 ```bash
 # Inside an activated .venv with `pip install -e ".[dev]"` already run:
 
-# Full deterministic suite (103 tests, no API key):
+# Full deterministic suite (108 tests, no API key):
 python -m pytest -m "not llm" -q
-# Expected: 103 passed
+# Expected: 108 passed
 
 # Contract tests for the Rules Referee (7 tests, includes Block 2 persistence checks):
 python -m pytest tests/test_rules_referee.py -v
 # Expected: all 7 tests pass
+
+# Contract tests for the Lore Keeper (5 tests, all no-API-key):
+python -m pytest tests/test_lore_keeper.py -v
+# Expected: all 5 tests pass
 
 # Tests for can_afford (9 tests in test_rules.py):
 python -m pytest tests/test_rules.py -v -k "can_afford"
@@ -665,6 +875,7 @@ python -m pytest tests/test_state.py         -q    # 9 tests
 python -m pytest tests/test_models.py        -q    # 21 tests
 python -m pytest tests/test_rules.py         -q    # 38 tests (29 original + 9 can_afford)
 python -m pytest tests/test_rules_referee.py -q    # 7 tests
+python -m pytest tests/test_lore_keeper.py   -q    # 5 tests
 ```
 
 **Verify the contract directly (no API key):**
@@ -676,10 +887,18 @@ print(RULES_REFEREE_INSTRUCTIONS)
 # Expected: the full instruction block; contains "roll_dice", "check_can_afford",
 # "do not narrate", and an honest-failure clause.
 
+# Read the Lore Keeper's instructions constant — same pattern, no SDK needed:
+from dungeon_agents.agents.lore_keeper import LORE_KEEPER_INSTRUCTIONS
+print(LORE_KEEPER_INSTRUCTIONS)
+# Expected: contains "set_location", "set_quest", "update_summary",
+# "do not narrate", "do not roll dice", and the "not set yet" honest-gap clause.
+
 # Read the GM's updated instructions:
 from dungeon_agents.agents.game_master import GAME_MASTER_INSTRUCTIONS
 print("rules_referee" in GAME_MASTER_INSTRUCTIONS)  # True
-print("roll_dice" in GAME_MASTER_INSTRUCTIONS)       # False (GM no longer rolls dice)
+print("lore_keeper" in GAME_MASTER_INSTRUCTIONS)    # True (Block 3)
+print("roll_dice" in GAME_MASTER_INSTRUCTIONS)      # False (GM no longer rolls dice)
+print("set_location" in GAME_MASTER_INSTRUCTIONS)   # False (moved to Lore Keeper)
 ```
 
 **Verify `can_afford` at the REPL (no API key):**
@@ -769,7 +988,27 @@ print(reloaded2.player.hp)    # 0  (clamped, not negative)
 
 ```bash
 dungeon-agents
-# With DUNGEON_DEBUG=1 (or typing `debug` at the prompt), observe the agent handoff:
+# With DUNGEON_DEBUG=1 (or typing `debug` at the prompt), observe the agent handoffs.
+# A turn that triggers both specialists produces three agent-start lines:
+#
+#   You: I accept the quest and head north into the Whispering Forest
+#
+#   [debug] agent Game Master is working...
+#   [debug] Game Master -> tool lore_keeper...
+#   [debug] agent Lore Keeper is working...
+#   [debug] Lore Keeper -> tool set_location(location='the Whispering Forest')...
+#   [debug]   set_location -> Location set to: the Whispering Forest (NN ms)
+#   [debug] Lore Keeper -> tool set_quest(title='Find the lost relic')...
+#   [debug]   set_quest -> Quest set to: Find the lost relic (NN ms)
+#   [debug] Lore Keeper -> tool update_summary(...)...
+#   [debug]   update_summary -> Summary updated. (NN ms)
+#   [debug]   lore_keeper -> Location set to the Whispering Forest; quest set to Find
+#              the lost relic. Summary updated with arrival scene. (NN ms)
+#
+# The GM then narrates the scene. The `stats` command will now show the new location
+# and quest without any model call — reading directly from persisted GameState.
+#
+# After the Lore Keeper returns, the GM may also consult the Referee:
 #
 #   You: I try to buy a rope from the merchant for 5 gold
 #
@@ -781,19 +1020,6 @@ dungeon-agents
 #   [debug]   rules_referee -> DISALLOWED: the player has 0 gold, cannot spend 5. (NN ms)
 #
 # The GM then narrates the refusal in-character, around the Referee's ruling.
-#
-#   You: I try to climb the castle wall
-#
-#   [debug] agent Game Master is working...
-#   [debug] Game Master -> tool rules_referee...
-#   [debug] agent Rules Referee is working...
-#   [debug] Rules Referee -> tool skill_check(difficulty='hard')...
-#   [debug]   skill_check -> FAILURE: rolled 7 on 1d20 vs hard (needs 15+). (NN ms)
-#   [debug]   Rules Referee -> tool change_hp(delta=-4)...
-#   [debug]   change_hp -> HP changed by -4. Aria now has 76/100 HP. (NN ms)
-#   [debug]   rules_referee -> DISALLOWED: rolled 7 vs hard (needs 15+); fall deals 4 damage. (NN ms)
-#
-# The GM narrates the fall in-character. The HP change is already on disk.
 ```
 
 ---
@@ -821,15 +1047,31 @@ two model calls per contested action. Latency increases. On a fast model like
 a slow connection or a rate-limited key will notice. Future blocks should measure
 whether the additional specialization justifies the latency cost.
 
-**The Game Master still holds mutation tools.**
+**The Game Master still holds inventory mutation tools.**
 
-The GM can call `add_item`, `remove_item`, `get_inventory`, `set_location`,
-`set_quest`, and `update_summary` directly, without consulting the Referee. The
-architectural separation between narration (GM) and arbitration (Referee) is only
-enforced by the GM's instructions, not by hard tool boundaries. If the GM
-incorrectly decides to add an item without checking whether the player won it
-fairly, nothing in the code prevents it. Future blocks (Inventory Keeper) will
-address this by moving mutation tools from the GM to a dedicated keeper agent.
+The GM can call `add_item` and `remove_item` directly, without consulting the
+Referee or the Lore Keeper. The architectural separation between narration (GM),
+arbitration (Referee), and world-state sync (Lore Keeper) is only enforced by
+each agent's instructions, not by hard tool boundaries. If the GM adds an item
+without checking whether the player won it fairly, nothing in the code prevents
+it. Future blocks (Inventory Keeper) will address this by moving `add_item` and
+`remove_item` from the GM to a dedicated keeper agent.
+
+Note: `set_location`, `set_quest`, and `update_summary` have been removed from
+the GM's tool list in Block 3. The GM physically cannot call them; it must go
+through the Lore Keeper. That boundary is now enforced by tool availability, not
+just by instruction.
+
+**World-state sync reliability depends on the GM calling the Lore Keeper.**
+
+Whether the GM consults the Lore Keeper is a model probability, not a guarantee.
+A GM that narrates "you arrive at the Ancient Ruins" without calling `lore_keeper`
+leaves `location` unchanged in `GameState` — `stats` shows the previous value or
+"not set yet." The mitigation: (1) the GM's instructions name exactly when to
+consult the Lore Keeper; (2) debug mode makes omissions visible; (3) the honest
+gap ("not set yet") is the correct failure mode — never a fabricated value. The
+compliance rate is a metric. If it proves poor, the escalation is deterministic
+Python, not a longer prompt (section 2.8).
 
 **`validate_action` is retired with no migration path.**
 
@@ -878,11 +1120,14 @@ omission is a visible gap and a logged event, not a fabricated state.
 
 The multi-agent patterns introduced in M6 are the direct precursor to a
 distributed QA system where specialist agents handle different phases of test
-evaluation.
+evaluation. With three agents now built (GM, Rules Referee, Lore Keeper), the
+mapping covers both mechanical and narrative-state specialization.
 
 | Dungeon Agents (M6) | TestOps AI equivalent |
 |---------------------|----------------------|
 | Rules Referee: one narrow job, narrow tool set | A "Result Validator" agent: one job (decide pass/fail), access only to the assertion library, no side effects |
+| Lore Keeper: owns narrative-state sync; prohibited from touching mechanics | A "Run Recorder" agent: one job (write the test result to the database); prohibited from mutating test logic or re-running tests |
+| Referee / Lore Keeper boundary: each has a prohibited zone the other owns | QA pipeline boundary: the Validator reads and decides; the Recorder writes; the two must never blur or you get the Block 2 persistence bug at the QA layer |
 | `check_can_afford`: code decides, model translates | A test assertion: code evaluates the condition; the agent triggers the assertion with the correct parameters |
 | `validate_action` retired for a misleading name | Any QA tool named `validate_*` that defers the decision to a model is misnamed and misdesigned — rename and rewrite |
 | GM instructs Referee; Referee may not be consulted | QA orchestrator instructs result-recording agent; agent may skip steps — design for partial compliance, not assumed compliance |
@@ -908,9 +1153,14 @@ evaluation.
 
 Separating "execute" from "evaluate" from "record" into agents with narrow
 instructions and only the tools their job requires is the same structural answer
-M6 applies to the game. In TestOps AI, this separation also creates a natural
-audit trail: each agent's contribution is a distinct step in a traceable pipeline,
-not a buried step inside one large agent's context.
+M6 applies to the game. The Rules Referee maps to the "evaluate" agent (reads
+state, applies rules, returns a verdict); the Lore Keeper maps to the "record"
+agent (writes narrative state after the story beat is decided, without
+re-evaluating what it records). The Game Master maps to the orchestrator (drives
+the run, delegates evaluation and recording, narrates the outcome). In TestOps
+AI, this separation also creates a natural audit trail: each agent's contribution
+is a distinct step in a traceable pipeline, not a buried step inside one large
+agent's context.
 
 The lesson from `validate_action → check_can_afford` is directly applicable: any
 tool in a QA system named `validate_*` or `check_*` that does not perform
@@ -941,29 +1191,27 @@ session, query the database, and verify the result is there.
 
 **Inventory Keeper (next block).**
 The `add_item`, `remove_item`, and `get_inventory` tools currently live with the
-Game Master. Moving them to a dedicated Inventory Keeper agent narrows the GM
-further and creates a single agent responsible for inventory truth. The GM would
-call the Inventory Keeper as a tool for any inventory read or mutation, the same
-pattern used for the Referee.
-
-**Lore Keeper (future block).**
-`update_summary`, `set_location`, `set_quest`, and `last_scene` management are
-natural candidates for a Lore Keeper that owns the narrative record. The GM
-consults the Lore Keeper to update or retrieve story context, rather than holding
-those tools itself.
+Game Master. Moving them to a dedicated Inventory Keeper agent completes the
+specialization: the GM orchestrates, the Referee arbitrates, the Lore Keeper
+syncs the narrative world, and the Inventory Keeper is the single source of truth
+for what the player carries. The GM would call the Inventory Keeper as a tool for
+any inventory read or mutation — the same agent-as-tool pattern used for both
+existing specialists.
 
 **Critic (future block).**
 A Critic agent that reviews the GM's draft response before it reaches the player.
 This is likely a pipeline step (unconditional code-controlled review), not an
 agent-as-tool call — the Critic always runs, and if it objects, the GM revises.
-This introduces the concept of a review chain, the third coordination pattern.
+This introduces the third coordination pattern (section 3.3): a code-controlled
+sequence where the Critic's step is unconditional rather than GM-discretionary.
 
 **Handoff exploration (future block).**
 Once all specialists exist, there will be scenarios where a full handoff is
 appropriate — for example, when the player's action is purely about inventory
 management and the Inventory Keeper can resolve the entire turn without GM
-narration. Block 1 deliberately chose not to use handoffs to preserve narration
-control; future blocks will explore the cases where handoffs are correct.
+narration. Block 3 deliberately used agent-as-tool (not handoff) for the Lore
+Keeper to preserve narration control; future blocks will explore the cases where
+handoffs are correct.
 
 **Wiring win/lose detection (carryover from M5).**
 `is_game_won` and `is_game_over` from M4 are still not called after each turn in
