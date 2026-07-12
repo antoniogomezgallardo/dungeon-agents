@@ -13,10 +13,17 @@ paso).
 
 ---
 
-## 📚 Guías conceptuales (en español)
+## Guías conceptuales (en español)
 
 Documentos transversales, pensados para leerse fuera del código. Si empiezas de
 cero, léelos en este orden:
+
+0. **[Guía completa M1 a M7 — onboarding y consolidación](guia-completa-m1-a-m7.md)**
+   El documento maestro del proyecto. Lee esto si quieres entender todo lo
+   construido de M1 a M7 en una sola lectura: teoría de agentes desde cero,
+   arquitectura, recorrido milestone a milestone con código real comentado, y el
+   puente a TestOps AI. Pensado para alguien que llega sin conocer el proyecto ni
+   el mundo de los agentes.
 
 1. **[Teoría de agentes y su aplicación a QA](teoria-de-agentes-y-qa.md)**
    Empieza desde cero: qué es un agente, el bucle agéntico, qué son las tools, y
@@ -69,11 +76,14 @@ qué sigue). Léelos en orden; cada uno asume el anterior.
 | M4 | Inventario y reglas | [milestone-04-inventory-rules.md](milestones/milestone-04-inventory-rules.md) |
 | M5 | Estado de sesión y UX | [milestone-05-session-ux.md](milestones/milestone-05-session-ux.md) |
 | M6 | Multi-agente | [milestone-06-multi-agent.md](milestones/milestone-06-multi-agent.md) |
+| M7 | Guardrails y seguridad | [milestone-07-guardrails.md](milestones/milestone-07-guardrails.md) |
 
 ---
 
 ## Por dónde empezar
 
+- **¿Llegas de cero y quieres entender todo el proyecto de una vez?** →
+  [Guía completa M1 a M7](guia-completa-m1-a-m7.md) (onboarding exhaustivo).
 - **¿Quieres entender los agentes desde cero?** → Guías conceptuales 1 → 2 → 3.
 - **¿Quieres validar la aplicación?** → El [plan de pruebas](plan-de-pruebas.md).
 - **¿Quieres ver cómo se construyó, paso a paso?** → Los deep-dives de milestone,
