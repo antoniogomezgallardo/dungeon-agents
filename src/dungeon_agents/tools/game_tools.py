@@ -148,22 +148,96 @@ def remove_item(item_name: str, quantity: int = 1) -> str:
 
 
 @function_tool
-def validate_action(action: str) -> str:
-    """Check whether a player's intended action is allowed by the game rules.
+def check_can_afford(
+    gold_cost: int = 0, item_name: str = "", item_quantity: int = 1
+) -> str:
+    """Check whether the player can afford a cost BEFORE allowing an action.
 
-    Use this before narrating the outcome of an action that spends resources or
-    uses items, so you never let the player do something impossible (spend gold
-    they lack, use an item they don't carry). Returns whether it's allowed and,
-    if not, a friendly reason to relay to the player.
+    Deterministic and read-only: the game's code (not the model) decides whether
+    the player has enough. Call this before allowing an action that spends gold or
+    uses items, passing the numbers you read from the story:
+    - `gold_cost`: how much gold the action costs (0 if none).
+    - `item_name` / `item_quantity`: an item the action consumes and how many.
+    Returns "Affordable." or a "Cannot afford: ..." reason naming what is short —
+    relay that reason to the player if disallowed. This nothing-is-spent check
+    replaces the old, model-judged `validate_action`.
 
     Args:
-        action: A short description of what the player wants to do.
+        gold_cost: Gold the action would cost. Defaults to 0.
+        item_name: An item the action would consume. Optional.
+        item_quantity: How many of that item are needed. Defaults to 1.
     """
-    game = _load_or_new_state()
-    summary = rules.get_inventory(game)
+    result = rules.can_afford(
+        _load_or_new_state(), gold_cost, item_name, item_quantity
+    )
+    return result.message
+
+
+@function_tool
+def earn_gold(amount: int) -> str:
+    """Give the player gold (a reward, loot, payment) and PERSIST it.
+
+    Call this whenever the story says the player gains gold, so the tracked state
+    (which stats and purchases read) actually reflects it. Without this call the
+    gold exists only in the narration and is lost on reload.
+
+    Args:
+        amount: How much gold to add (must be positive).
+    """
+    return _apply(rules.earn_gold(_load_or_new_state(), amount))
+
+
+@function_tool
+def spend_gold(amount: int) -> str:
+    """Deduct gold the player spends (a purchase, a bribe, a toll) and PERSIST it.
+
+    The rule refuses to overspend: a player cannot go below 0 gold. Prefer calling
+    `check_can_afford` first to tell the player *before* committing; this tool
+    performs the actual deduction once the spend is allowed.
+
+    Args:
+        amount: How much gold to deduct (must be positive).
+    """
+    return _apply(rules.spend_gold(_load_or_new_state(), amount))
+
+
+@function_tool
+def change_hp(delta: int) -> str:
+    """Apply a health change (damage as a negative delta, healing as positive).
+
+    HP is clamped to the valid range by the rules (never below 0, never above the
+    player's maximum), and the change is PERSISTED. Call this when the story deals
+    damage or heals the player, so stats and the lose condition stay accurate.
+
+    Args:
+        delta: HP change; negative for damage, positive for healing.
+    """
+    return _apply(rules.change_hp(_load_or_new_state(), delta))
+
+
+@function_tool
+def skill_check(difficulty: str = "moderate") -> str:
+    """Resolve a risky action by rolling 1d20 against a named difficulty.
+
+    Use this instead of a bare dice roll whenever an action's success is
+    uncertain (an attack, a climb, picking a lock, persuading a guard). YOU judge
+    how hard it is and pass a difficulty; the CODE rolls and decides success or
+    failure — you cannot overrule the result, only narrate it.
+
+    Difficulty levels: "trivial", "easy", "moderate", "hard", "very_hard".
+    Returns the roll, the threshold, and whether it SUCCEEDED or FAILED.
+
+    Args:
+        difficulty: How hard the action is. Defaults to "moderate".
+    """
+    try:
+        result = dice.resolve_check(difficulty)
+    except dice.InvalidDifficultyError as exc:
+        return f"Invalid difficulty: {exc}"
+    verdict = "SUCCESS" if result.success else "FAILURE"
     return (
-        f"Player has {game.player.gold} gold and {game.player.hp} HP. {summary}\n"
-        f"Judge whether this action is possible with those resources: {action}"
+        f"{verdict}: rolled {result.roll} on 1d20 vs {result.difficulty} "
+        f"(needs {result.threshold}+)."
     )
 
 

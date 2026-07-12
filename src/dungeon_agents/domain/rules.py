@@ -43,6 +43,58 @@ def get_inventory(state: GameState) -> str:
     return "Inventory:\n" + "\n".join(lines)
 
 
+def can_afford(
+    state: GameState,
+    gold_cost: int = 0,
+    item_name: str = "",
+    item_quantity: int = 1,
+) -> ActionResult:
+    """Check — WITHOUT changing anything — whether the player can afford an action.
+
+    A read-only, deterministic pre-check (a "dry run"): does the player have at
+    least `gold_cost` gold, and at least `item_quantity` of `item_name`? It never
+    spends or removes; it only reports whether the spend/use WOULD be allowed.
+
+    This is the honest replacement for the old `validate_action`, which merely
+    handed the decision back to the model. Here the *code* decides — the same
+    principle as `spend_gold` / `remove_item`, applied as a verification instead
+    of a mutation. Returns an ActionResult: success True when affordable, or False
+    with a friendly reason naming exactly what is short.
+
+    Both checks are optional: pass only `gold_cost` to check money, only
+    `item_name` to check an item, or both. With neither, the action costs nothing
+    and is trivially affordable.
+    """
+    reasons: list[str] = []
+
+    if gold_cost < 0:
+        return ActionResult(success=False, message="A cost cannot be negative.")
+    if gold_cost > state.player.gold:
+        reasons.append(
+            f"needs {gold_cost} gold but only has {state.player.gold}"
+        )
+
+    name = item_name.strip()
+    if name:
+        if item_quantity < 1:
+            return ActionResult(
+                success=False, message="An item quantity must be positive."
+            )
+        existing = _find_item(state, name)
+        have = existing.quantity if existing else 0
+        if have < item_quantity:
+            reasons.append(
+                f"needs {item_quantity}x {name} but has {have}"
+            )
+
+    if reasons:
+        return ActionResult(
+            success=False,
+            message="Cannot afford: " + "; ".join(reasons) + ".",
+        )
+    return ActionResult(success=True, message="Affordable.")
+
+
 def add_item(state: GameState, name: str, quantity: int = 1) -> ActionResult:
     """Add `quantity` of an item to the inventory, returning the new state.
 

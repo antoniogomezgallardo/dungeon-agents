@@ -34,6 +34,13 @@ RESUME_PROMPT = (
     "the scene just shown; do not restart or re-introduce the setting."
 )
 
+# The Critic reviews each scene before the player sees it. If it finds a
+# contradiction with the tracked state, the Game Master is asked to regenerate.
+# This cap is a deterministic anti-loop guard: we retry AT MOST this many times,
+# then show the scene anyway (with a debug note). The limit lives in code, never
+# at the model's discretion — an agent that keeps rejecting must not hang the game.
+MAX_SCENE_RETRIES = 1
+
 # Player-facing help. Written to set honest expectations for the current
 # milestone: the tools work, but deep mechanics (real attributes, rules, a goal)
 # arrive in later milestones. Keeping this accurate avoids over-promising.
@@ -173,6 +180,111 @@ def _remember_last_scene(scene: str) -> None:
     game_state.save_state(current)
 
 
+def _check_end_of_game(state=None):
+    """Return an end-of-game outcome from the validated state, or None.
+
+    Deterministic: victory and defeat are decided by tested rules over the
+    GameState (`is_game_won` / `is_game_over`), never by the narrator. The Game
+    Master may describe a dramatic fall, but whether the game is actually OVER is
+    read from the tracked HP and quest — the last and clearest application of the
+    project's core rule that outcomes live in code, not in the story.
+
+    Args:
+        state: The GameState to judge. Defaults to the saved state (what the game
+            loop uses); tests inject one directly for deterministic checks.
+
+    Returns one of "won", "lost", or None (game continues). "lost" takes
+    precedence: a fallen hero can't also have just won.
+    """
+    from dungeon_agents.domain import rules
+
+    if state is None:
+        state = game_state.load_state_or_none()
+    if state is None:
+        return None
+    if rules.is_game_over(state):
+        return "lost"
+    if rules.is_game_won(state):
+        return "won"
+    return None
+
+
+def _print_end_of_game(outcome: str) -> None:
+    """Print the win/lose panel that ends the adventure."""
+    if outcome == "won":
+        console.print(
+            Panel(
+                "[bold]Victory![/bold] You have completed your quest. "
+                "Your adventure ends in triumph.",
+                title="The End",
+                border_style="green",
+            )
+        )
+    else:  # "lost"
+        console.print(
+            Panel(
+                "[bold]You have fallen.[/bold] Your HP reached 0 and your "
+                "adventure ends here.",
+                title="Game Over",
+                border_style="red",
+            )
+        )
+    console.print(
+        "[dim]Type [cyan]new[/cyan] next time to begin a fresh adventure.[/dim]"
+    )
+
+
+def _state_for_review() -> str:
+    """Build a compact, factual snapshot of the tracked state for the Critic.
+
+    Deterministic: read straight from the validated GameState so the Critic checks
+    the scene against hard facts, not the model's memory. Empty-safe when there's
+    no save yet.
+    """
+    from dungeon_agents.domain import rules
+
+    state = game_state.load_state_or_none()
+    if state is None:
+        return "No tracked state yet."
+    p = state.player
+    quest = state.active_quest.title if state.active_quest else "none"
+    where = state.location if state.location != "unknown" else "unset"
+    return (
+        f"HP: {p.hp}/{p.max_hp}; Gold: {p.gold}; Location: {where}; "
+        f"Quest: {quest}. {rules.get_inventory(state)}"
+    )
+
+
+def _review_scene(critic, runner, scene: str, debug: DebugState) -> str | None:
+    """Ask the Critic whether `scene` is consistent with the tracked state.
+
+    Returns None if consistent (OK), or a short reason string if the Critic found
+    a contradiction. The Critic's verdict is a STRUCTURED token ("OK" / "PROBLEM:
+    ...") so this code — not another model — decides what to do next.
+    """
+    from dungeon_agents.agents.critic import CRITIC_PROBLEM_PREFIX
+
+    review_input = [
+        {
+            "role": "user",
+            "content": (
+                "Tracked game state:\n"
+                f"{_state_for_review()}\n\n"
+                "Scene the Game Master just wrote:\n"
+                f"{scene}\n\n"
+                "Is the scene consistent with the tracked state? Answer OK or "
+                "PROBLEM: <reason>."
+            ),
+        }
+    ]
+    verdict = runner.run_sync(critic, review_input).final_output.strip()
+    if debug.enabled:
+        console.print(f"[dim][debug] Critic verdict: {verdict}[/dim]")
+    if verdict.upper().startswith(CRITIC_PROBLEM_PREFIX):
+        return verdict[len(CRITIC_PROBLEM_PREFIX):].strip() or "unspecified contradiction"
+    return None
+
+
 def _resume_banner(state) -> None:
     """Print the deterministic recap + last scene when resuming a saved game."""
     p = state.player
@@ -268,7 +380,10 @@ def run() -> None:
     with console.status("[dim]Loading the game engine (first run can take a moment)…[/dim]"):
         from agents import Runner
 
+        from dungeon_agents.agents.critic import build_critic
+
         game_master = build_game_master(settings)
+        critic = build_critic(settings)
         debug = DebugState(enabled=settings.debug)
         tool_hooks = _build_tool_hooks(debug)
 
@@ -302,12 +417,44 @@ def run() -> None:
         _last_scene = ""
 
     while True:
+        # Generate the scene, then have the Critic review it against the tracked
+        # state before the player sees it. If it finds a contradiction, ask the
+        # Game Master to regenerate — a self-repair loop, bounded by
+        # MAX_SCENE_RETRIES so a stubborn Critic can never hang the turn.
         result = Runner.run_sync(game_master, conversation, hooks=tool_hooks)
+        for _ in range(MAX_SCENE_RETRIES):
+            problem = _review_scene(critic, Runner, result.final_output, debug)
+            if problem is None:
+                break  # scene is consistent — show it
+            if debug.enabled:
+                console.print(
+                    f"[dim][debug] regenerating scene (Critic: {problem})[/dim]"
+                )
+            # Feed the problem back and regenerate from the same context.
+            retry_input = result.to_input_list() + [
+                {
+                    "role": "user",
+                    "content": (
+                        "A consistency check flagged your last scene: "
+                        f"{problem}. Rewrite the scene so it matches the tracked "
+                        "game state, keeping the same intent and choices."
+                    ),
+                }
+            ]
+            result = Runner.run_sync(game_master, retry_input, hooks=tool_hooks)
+
         _last_scene = result.final_output
         _print_scene(_last_scene)
         _remember_last_scene(_last_scene)  # persist for a deterministic resume
         # Carry the full history forward so the next turn keeps context.
         conversation = result.to_input_list()
+
+        # End-of-game is decided by tested rules over the validated state, not by
+        # the narration. If the hero has won or fallen, announce it and stop.
+        outcome = _check_end_of_game()
+        if outcome is not None:
+            _print_end_of_game(outcome)
+            return
 
         try:
             # The label hints that free-form actions are allowed, not just the

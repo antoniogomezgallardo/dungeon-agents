@@ -19,6 +19,7 @@ from dungeon_agents.domain.models import (
 )
 from dungeon_agents.domain.rules import (
     add_item,
+    can_afford,
     change_hp,
     complete_quest,
     earn_gold,
@@ -243,3 +244,64 @@ def test_is_game_won_false_without_quest() -> None:
 def test_is_game_over_when_hp_zero() -> None:
     assert is_game_over(_fresh_state(hp=0)) is True
     assert is_game_over(_fresh_state(hp=1)) is False
+
+
+# --- can_afford (M6 — the honest, deterministic resource pre-check) ----------
+
+def test_can_afford_no_cost_is_trivially_true() -> None:
+    """An action that costs nothing is always affordable."""
+    result = can_afford(_fresh_state())
+    assert result.success is True
+
+
+def test_can_afford_enough_gold() -> None:
+    result = can_afford(_fresh_state(gold=50), gold_cost=30)
+    assert result.success is True
+
+
+def test_can_afford_not_enough_gold_fails_with_reason() -> None:
+    """Too little gold fails, and the message names exactly what's short."""
+    result = can_afford(_fresh_state(gold=3), gold_cost=5)
+    assert result.success is False
+    assert "3" in result.message and "5" in result.message
+
+
+def test_can_afford_negative_cost_rejected() -> None:
+    result = can_afford(_fresh_state(gold=10), gold_cost=-1)
+    assert result.success is False
+
+
+def test_can_afford_has_the_item() -> None:
+    state = _fresh_state()
+    state.inventory.append(InventoryItem(name="Potion", quantity=2))
+    result = can_afford(state, item_name="potion", item_quantity=2)
+    assert result.success is True
+
+
+def test_can_afford_missing_item_fails() -> None:
+    result = can_afford(_fresh_state(), item_name="Rope", item_quantity=1)
+    assert result.success is False
+    assert "rope" in result.message.lower()
+
+
+def test_can_afford_not_enough_of_the_item_fails() -> None:
+    state = _fresh_state()
+    state.inventory.append(InventoryItem(name="Arrow", quantity=1))
+    result = can_afford(state, item_name="Arrow", item_quantity=3)
+    assert result.success is False
+
+
+def test_can_afford_checks_gold_and_item_together() -> None:
+    """Both shortfalls are reported when both gold and an item are lacking."""
+    result = can_afford(_fresh_state(gold=0), gold_cost=5, item_name="Key")
+    assert result.success is False
+    assert "gold" in result.message.lower() and "key" in result.message.lower()
+
+
+def test_can_afford_does_not_mutate_state() -> None:
+    """The pre-check is read-only: gold and inventory are untouched."""
+    state = _fresh_state(gold=10)
+    state.inventory.append(InventoryItem(name="Coin", quantity=1))
+    can_afford(state, gold_cost=5, item_name="Coin", item_quantity=1)
+    assert state.player.gold == 10
+    assert state.inventory[0].quantity == 1
