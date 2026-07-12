@@ -25,7 +25,7 @@ replacing a bare roll the model interpreted at whim). The design lesson: guarant
 what MUST always happen in code (the Critic always reviews; the retry cap is fixed),
 and let agents handle what tolerates an honest gap. See the reference guide
 [docs/principios-y-patrones-de-agentes.md](docs/principios-y-patrones-de-agentes.md).
-119 deterministic tests passing without an API key.
+125 deterministic tests passing without an API key.
 
 **M5 — Session state & UX (done).** Five blocks delivering a stable, honest
 session experience: **persistence unification** (retired the M2 free-form JSON
@@ -140,11 +140,38 @@ Meta-commands (no game turn consumed):
 | `stats` / `status` | HP, gold, location, quest — read directly from validated state, not AI-narrated |
 | `inventory` / `inv` | What you're carrying — same source |
 | `summary` / `recap` | Running story recap the GM has been keeping |
-| `help` | How to play |
-| `save` | Ask the GM to save your progress |
-| `new` | Discard the current save and start a fresh adventure |
+| `help` | How to play (then re-shows your current scene) |
+| `save <name>` | Save a named checkpoint you can return to exactly (e.g. `save before boss`) |
+| `load <name>` | Restore a named checkpoint — state and full conversation history |
+| `saves` | List all named checkpoints |
+| `new` | Discard the current game and start a fresh adventure (asks to confirm) |
 | `debug` | Toggle debug mode (see tool calls and timing; see `DUNGEON_DEBUG` below) |
-| `exit` / `quit` | Quit (progress is saved as you play) |
+| `exit` / `quit` | Quit (progress is saved automatically as you play) |
+
+**Startup menu.** When you launch with a saved game, the game asks whether to
+`continue` it or start `new`. Without a saved game, it starts immediately — no
+menu. Choosing `new` at the startup prompt, or typing `new` mid-game, asks for
+confirmation before discarding the current game so an accidental keypress never
+loses progress.
+
+**Autosave vs checkpoints.** Progress is saved automatically after every action
+— you never lose your place. Autosave is a single timeline: every action
+overwrites the previous save, so you cannot go back. A named checkpoint (`save
+<name>`) is a frozen snapshot that is never overwritten. It is the only way to
+return to an exact earlier moment. Checkpoints capture both the game state and
+the full conversation history, so `load <name>` restores the exact point — the
+model resumes with its full memory, not a re-improvised summary.
+
+**Learning note: why checkpoints capture two things.** An agent's state is two
+separate artifacts: (1) the validated data store (HP, gold, inventory, location —
+what `stats` reads), and (2) the conversation history (the model's memory of what
+has happened). The autosave keeps (1) current at all times. But restoring a game
+to an exact earlier moment requires both: if you reload (1) without (2), the model
+has forgotten what happened and improvises from a resume prompt rather than
+continuing naturally. `SaveSlot` (`domain/models.py`) bundles both halves
+together so `load <name>` is a complete, faithful restore. This is the key
+transfer lesson to TestOps AI: agent state = validated store + conversation
+memory, and point-in-time restore requires both.
 
 **Debug mode** surfaces what the agent does under the hood — which tools it calls,
 what they returned, and how long each took. Off by default. Enable it two ways:
@@ -176,11 +203,11 @@ python -m pytest                  # everything
 `pytest` is included in the `[dev]` extra installed in the Setup step above —
 no separate install needed.
 
-- **Deterministic tests** (no `llm` marker): **119 tests** across nine files, all
+- **Deterministic tests** (no `llm` marker): **125 tests** across nine files, all
   passing without an API key:
   - `test_smoke.py` — 10 tests: imports, config, provider selection, agent contract, debug flag
   - `test_dice.py` — 18 tests: dice domain logic, seeded RNG, bounds, skill checks (M6)
-  - `test_state.py` — 9 tests: validated persistence, tolerant loader, clear_state (M5)
+  - `test_state.py` — 15 tests: validated persistence, tolerant loader, clear_state (M5); named checkpoints — save/load round-trip, name sanitization, incompatible slot, list (post-M6)
   - `test_models.py` — 21 tests: Pydantic model validation and cascade
   - `test_rules.py` — 38 tests: inventory, gold/HP, win/lose, `can_afford` (M6)
   - `test_rules_referee.py` — 7 tests: Rules Referee contract, skill-check + persistence (M6)
@@ -200,23 +227,28 @@ dungeon-agents/
   src/dungeon_agents/
     config.py            # the ONLY place env vars are read; reads DUNGEON_DEBUG (M5)
     main.py              # console loop + I/O; meta-commands: stats, inventory,
-                         # summary, new, debug, help, save, exit;
-                         # _check_end_of_game / _print_end_of_game (M6 carryover)
+                         # summary, new, debug, help, save <name>, load <name>,
+                         # saves, exit; startup menu (continue/new); _confirm for
+                         # destructive ops; _check_end_of_game / _print_end_of_game (M6)
     domain/              # pure Python, zero SDK — testable business logic
-      models.py          # 5 Pydantic models: InventoryItem, Player, Quest, GameState
-                         # (+ last_scene field M5), ActionResult
+      models.py          # 6 Pydantic models: InventoryItem, Player, Quest, GameState
+                         # (+ last_scene field M5), ActionResult, SaveSlot (post-M6)
       dice.py            # roll_dice(), resolve_check() (M6), InvalidDiceError,
                          # InvalidDifficultyError, DIFFICULTY_THRESHOLDS, MIN/MAX_SIDES
       state.py           # save_state / load_state (strict) / load_state_or_none
                          # (tolerant, M5) / clear_state (M5) + StateError
-                         # (M2 free-form tools retired in M5; one validated format)
+                         # (M2 free-form tools retired in M5; one validated format);
+                         # save_checkpoint / load_checkpoint / list_checkpoints /
+                         # _safe_slot_filename (post-M6 named checkpoints)
       rules.py           # pure rule functions: inventory, gold, HP, win/lose (M4);
                          # can_afford() (M6)
     tools/               # thin @function_tool wrappers; one of two SDK-touching layers
-      game_tools.py      # tools: roll_dice, save_game, load_game, get_inventory,
-                         # add_item, remove_item, check_can_afford (M6, replaces
-                         # validate_action), earn_gold, spend_gold, change_hp (M6),
-                         # skill_check (M6), update_summary, set_location, set_quest
+      game_tools.py      # tools: roll_dice, get_inventory, add_item, remove_item,
+                         # check_can_afford (M6, replaces validate_action),
+                         # earn_gold, spend_gold, change_hp (M6), skill_check (M6),
+                         # update_summary, set_location, set_quest
+                         # (save_game / load_game were retired post-M6: autosave
+                         # makes them no-ops; save/load is now a console command)
     agents/
       game_master.py     # Game Master agent + GAME_MASTER_INSTRUCTIONS constant
       rules_referee.py   # Rules Referee agent + RULES_REFEREE_INSTRUCTIONS (M6)
@@ -225,7 +257,7 @@ dungeon-agents/
   tests/
     test_smoke.py        # 10 tests — imports, config, provider, agent contract, debug flag
     test_dice.py         # 18 tests — dice domain logic + resolve_check (M6)
-    test_state.py        # 9 tests  — validated persistence + tolerant loader + clear_state
+    test_state.py        # 15 tests — validated persistence + tolerant loader + clear_state; named checkpoints (post-M6)
     test_models.py       # 21 tests — Pydantic model validation
     test_rules.py        # 38 tests — inventory, gold, HP, win/lose rules + can_afford (M6)
     test_rules_referee.py # 7 tests — Rules Referee contract (M6)

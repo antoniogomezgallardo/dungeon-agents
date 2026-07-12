@@ -497,16 +497,27 @@ código, no por la decisión del modelo. La salida del agente A se convierte en 
 entrada del agente B, independientemente del contenido. Es un workflow (el código
 controla el flujo, no el modelo), no un agente autónomo.
 
-**En el proyecto.** No se usa todavía, pero es el patrón previsto para el futuro
-agente Critic. El Critic revisará la respuesta del Game Master antes de que
-llegue al jugador: si la aprueba, se muestra; si no, el Game Master revisa. Esa
-revisión ocurrirá siempre — no es una decisión contextual del GM, sino un paso
-incondicional de código.
+**En el proyecto.** Es el patrón del agente Critic (M6). El Critic revisa la
+respuesta del Game Master antes de que llegue al jugador: si la aprueba, se
+muestra; si no, el Game Master regenera la escena. Esa revisión ocurre siempre —
+no es una decisión contextual del GM, sino un paso incondicional orquestado en
+`main.py` (función `_play_turn`, `main.py:336-378`). La función `_review_scene`
+pasa al Critic el estado validado del `GameState` como datos duros, no desde la
+memoria del modelo. El cap `MAX_SCENE_RETRIES = 1` (`main.py:46`) garantiza que
+un Critic demasiado estricto nunca puede colgar la partida. El veredicto
+estructurado (`OK` / `PROBLEM: ...`) es parseado por código (`startswith`), no
+por otro modelo.
+
+La propiedad clave que diferencia este patrón de agent-as-tool: la revisión está
+garantizada en código, no depende de que el GM llame la tool. Un verificador que
+solo a veces verifica no es un verificador.
 
 **Cuándo usarlo.** Cuando una secuencia de pasos debe ocurrir siempre, en un
 orden fijo, con cada paso incondicionalmente dependiente del anterior. Útil para
 flujos de evaluación, revisión de calidad, o cuando la predecibilidad del flujo
-es más importante que la flexibilidad.
+es más importante que la flexibilidad. La distinción clave: si el paso puede
+omitirse honestamente (como el Lore Keeper), usa agent-as-tool; si omitirlo
+destruye la garantía (como el Critic), usa pipeline.
 
 ---
 
