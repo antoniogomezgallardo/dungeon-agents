@@ -227,8 +227,9 @@ QA con agentes (TestOps AI) necesitará:
 | Hooks / modo debug (M5) | Trazabilidad: registro de cada decisión del agente para poder auditarla. |
 | Inyección de dependencias (RNG, rutas) | Reproducibilidad: fijar las fuentes de variación para reproducir un fallo. |
 | "not set yet" en vez de valor falso | Fallo honesto: nunca un falso "PASÓ"; un hueco visible antes que un falso positivo. |
-| Guardrails (M7, futuro) | Defensa ante prompt injection / jailbreak; superficie del red teaming. |
-| Multi-agente (M6, futuro) | Testing de orquestaciones multi-agente y de llamadas-a-tool alucinadas. |
+| Guardrails: 2-layer input + output Character Judge (M7, hecho) | Defensa en profundidad: prevenir ataques de entrada y detectar drift de salida. Superficie del red teaming; patrón directamente transferible a pipelines de QA que pueden ser atacados. |
+| Tests `@pytest.mark.llm` con oráculo débil `startswith(token)` (M7, hecho) | Patrón de evaluación para cualquier clasificador LLM: verifica la categoría, no el texto exacto. Reutilizable en evaluation harnesses de M8. |
+| Multi-agente (M6, hecho) | Testing de orquestaciones multi-agente y de llamadas-a-tool alucinadas. |
 | Evaluación (M8, futuro) | Frameworks de evaluación tipo LLM-as-a-judge / benchmarks. |
 
 Cada fila de la izquierda es un ejercicio deliberado para dominar la de la
@@ -252,8 +253,11 @@ derecha.
    frameworks de test + herramientas de evaluación de LLMs. Rol nuevo, en auge y
    bien pagado.
 5. **El puente:** cada patrón que practicas en Dungeon Agents (determinismo,
-   estado validado, observabilidad, reproducibilidad, fallo honesto, guardrails)
-   es un cimiento directo de ese trabajo y de TestOps AI.
+   estado validado, observabilidad, reproducibilidad, fallo honesto, guardrails —
+   M7 completo) es un cimiento directo de ese trabajo y de TestOps AI. M7 añade
+   el patrón de defensa en profundidad (input/output guardrails) y el patrón de
+   tests para clasificadores LLM (oráculo débil, auto-skip sin key), ambos
+   directamente exportables a pipelines de QA con agentes.
 
 ---
 
