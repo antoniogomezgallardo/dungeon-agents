@@ -73,35 +73,11 @@ def roll_dice(sides: int) -> str:
     return f"Rolled a {value} on a {sides}-sided die."
 
 
-@function_tool
-def save_game() -> str:
-    """Save the player's current progress so it persists between sessions.
-
-    Saves the game's validated state (player, inventory, gold, HP, location,
-    quest) to a safe project directory. Call this when the player asks to save.
-    You do not pass any data — the current tracked game state is saved as-is.
-    """
-    current = state.load_state_or_none() or new_game_state()
-    return state.save_state(current)
-
-
-@function_tool
-def load_game() -> str:
-    """Resume the player's saved adventure and summarize where they left off.
-
-    Call this when the player asks to load or continue a saved game. Returns a
-    short factual summary of the saved state (or a note that no valid save
-    exists, in which case a new game begins).
-    """
-    saved = state.load_state_or_none()
-    if saved is None:
-        return "No saved game found (or it was incompatible). Starting a new adventure."
-    p = saved.player
-    quest = saved.active_quest.title if saved.active_quest else "none"
-    return (
-        f"Resumed. {p.name} is at {saved.location} with {p.hp}/{p.max_hp} HP and "
-        f"{p.gold} gold. Active quest: {quest}."
-    )
+# Note: the M2-era `save_game` / `load_game` tools were retired here. The game
+# autosaves after every action (the load-modify-save pattern below), so an
+# agent-driven "save" was a no-op, and "load" only narrated a summary without
+# actually restoring anything. Save/load is now a deterministic player action in
+# the console (named checkpoints), not something the model manages.
 
 
 # --- Milestone 4: inventory & rule tools -------------------------------------

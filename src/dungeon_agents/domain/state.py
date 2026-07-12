@@ -18,9 +18,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import re
+
 from pydantic import ValidationError
 
-from dungeon_agents.domain.models import GameState
+from dungeon_agents.domain.models import GameState, SaveSlot
 
 # The one directory game state is allowed to live in. Resolved relative to the
 # project root (three parents up from this file: domain/ -> dungeon_agents/ ->
@@ -28,6 +30,9 @@ from dungeon_agents.domain.models import GameState
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DATA_DIR = _PROJECT_ROOT / "data"
 STATE_FILENAME = "game_state.json"
+
+# Named checkpoints live in a subdirectory of the data dir, one file per slot.
+SAVES_DIRNAME = "saves"
 
 
 class StateError(Exception):
@@ -113,3 +118,72 @@ def clear_state(*, data_dir: Path | None = None) -> None:
     """Delete the saved state file if it exists (used to start a new game)."""
     path = _state_path(data_dir or DEFAULT_DATA_DIR)
     path.unlink(missing_ok=True)
+
+
+# --- Named checkpoints (manual save/load slots) ------------------------------
+#
+# The autosave above is the in-progress game. A checkpoint is a named snapshot
+# the player creates with `save <name>` and restores with `load <name>`. Same two
+# safety ideas as the autosave: writes are confined to the data directory (the
+# name is sanitized to a safe filename — no `../`, no path separators), and
+# content is validated against the SaveSlot schema.
+
+
+def _safe_slot_filename(name: str) -> str:
+    """Turn a player-typed slot name into a safe, bounded filename.
+
+    Keeps letters, digits, spaces, hyphens and underscores; everything else
+    (path separators, dots, `..`) is stripped. Spaces collapse to underscores.
+    The result can never escape the saves directory — a bounded write.
+
+    Raises:
+        StateError: if the name has no usable characters (e.g. was all slashes).
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9 _-]", "", name).strip()
+    cleaned = re.sub(r"\s+", "_", cleaned)
+    if not cleaned:
+        raise StateError(f"'{name}' is not a usable save name.")
+    return f"{cleaned}.json"
+
+
+def _saves_dir(data_dir: Path | None) -> Path:
+    return (data_dir or DEFAULT_DATA_DIR) / SAVES_DIRNAME
+
+
+def save_checkpoint(slot: SaveSlot, *, data_dir: Path | None = None) -> str:
+    """Persist a named checkpoint (validated GameState + conversation).
+
+    The slot's `name` is sanitized into the filename, so two names that sanitize
+    to the same thing share a file (last write wins) — acceptable for a simple
+    manual-save feature. Returns a short confirmation message.
+    """
+    target_dir = _saves_dir(data_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    path = target_dir / _safe_slot_filename(slot.name)
+    path.write_text(slot.model_dump_json(indent=2), encoding="utf-8")
+    return f"Saved checkpoint '{slot.name}'."
+
+
+def load_checkpoint(name: str, *, data_dir: Path | None = None) -> SaveSlot | None:
+    """Load a named checkpoint, or None if it's missing OR incompatible.
+
+    Tolerant, like `load_state_or_none`: a checkpoint whose file is absent, or
+    whose contents don't match the current SaveSlot schema (e.g. an SDK format
+    change broke the conversation shape), returns None so the caller can report
+    an honest "no such checkpoint / incompatible" rather than crashing.
+    """
+    path = _saves_dir(data_dir) / _safe_slot_filename(name)
+    if not path.exists():
+        return None
+    try:
+        return SaveSlot.model_validate_json(path.read_text(encoding="utf-8"))
+    except ValidationError:
+        return None
+
+
+def list_checkpoints(*, data_dir: Path | None = None) -> list[str]:
+    """Return the names (filenames without extension) of saved checkpoints."""
+    saves = _saves_dir(data_dir)
+    if not saves.exists():
+        return []
+    return sorted(p.stem for p in saves.glob("*.json"))

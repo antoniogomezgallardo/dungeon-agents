@@ -3,7 +3,8 @@
 > **Status:** Done — all four agents built (Game Master + Rules Referee + Lore
 > Keeper + Critic), persistence fixed, skill-check mechanic, review pipeline, and
 > end-of-game detection wired.
-> 119 deterministic tests passing without an API key.
+> 119 deterministic tests at M6 completion. (Post-M6 fixes added 6 more checkpoint
+> tests in `test_state.py`; current total is 125. See CLAUDE.md post-M6 note.)
 >
 > **Theme:** Specialization + coordination produce reliability that a single
 > agent with a longer prompt never can. The model orchestrates; the code verifies.
@@ -131,10 +132,18 @@ After Block 2, the tool assignments were:
 
 | Agent | Tools |
 |-------|-------|
-| Game Master | `rules_referee` (the Referee as tool), `save_game`, `load_game`, `get_inventory`, `add_item`, `remove_item`, `update_summary`, `set_location`, `set_quest` (9 total) |
+| Game Master | `rules_referee` (the Referee as tool), `get_inventory`, `add_item`, `remove_item`, `update_summary`, `set_location`, `set_quest` (7 total) |
 | Rules Referee | `skill_check`, `roll_dice`, `check_can_afford`, `earn_gold`, `spend_gold`, `change_hp` (6 total) |
 
-The total tool count visible to the system was 15, but the GM saw 9 and the
+Note: `save_game` and `load_game` existed as agent tools at the end of M5 but
+were removed before M6 was shipped. The game autosaves after every action (via the
+load-modify-save pattern), making an agent-driven `save_game` a no-op; and
+`load_game` only narrated a state summary without actually restoring anything.
+Save/load was redesigned as a deterministic console command (named checkpoints,
+post-M6 — see `state.py`). The tools are absent here because the correct M6
+snapshot does not include them.
+
+The total tool count visible to the system was 13, but the GM saw 7 and the
 Referee saw 6. Specialization means narrowing, not growing. The Referee grew
 from 2 to 6 tools in Block 2 because arbitrating an outcome now includes
 persisting its consequences — those four tools are not narration tools, they are
@@ -475,14 +484,14 @@ and we measure its compliance rate as a QA metric. That measurement is M8's job.
 
 | Agent | Tools |
 |-------|-------|
-| Game Master | `rules_referee` (as tool), `lore_keeper` (as tool), `save_game`, `load_game`, `get_inventory`, `add_item`, `remove_item` (7 direct tools + 2 agent-as-tool = 9 entries) |
+| Game Master | `rules_referee` (as tool), `lore_keeper` (as tool), `get_inventory`, `add_item`, `remove_item` (3 direct tools + 2 agent-as-tool = 5 entries) |
 | Rules Referee | `skill_check`, `roll_dice`, `check_can_afford`, `earn_gold`, `spend_gold`, `change_hp` (6 total) |
 | Lore Keeper | `set_location`, `set_quest`, `update_summary`, `get_inventory` (4 total) |
 
-The GM's direct tool count decreased from 9 (Block 2) to 7 (Block 3): three
-narrative-state tools migrated to the Lore Keeper, and in exchange the Lore
-Keeper appears as one new agent-as-tool entry. The system's total tool surface
-is now 19 across three agents, but each agent sees only what its job requires.
+The GM's direct tool count decreased: three narrative-state tools migrated to the
+Lore Keeper, and in exchange the Lore Keeper appears as one new agent-as-tool
+entry. The system's total tool surface across three agents is 15, but each agent
+sees only what its job requires.
 
 ### 2.9 Block 4 — The Critic: a fourth agent and a different coordination pattern
 
@@ -698,11 +707,11 @@ plus the GM's scene, runs the Critic with `Runner.run_sync`, and parses the
 structured verdict with a string prefix check — no model call to interpret the
 verdict, just a `startswith`.
 
-**Tool count after Block 4.**
+**Tool count after Block 4 (and as shipped in M6).**
 
 | Agent | Tools | Pattern |
 |-------|-------|---------|
-| Game Master | `rules_referee` (as tool), `lore_keeper` (as tool), `save_game`, `load_game`, `get_inventory`, `add_item`, `remove_item` (7 direct + 2 agent-as-tool = 9 entries) | Orchestrator |
+| Game Master | `rules_referee` (as tool), `lore_keeper` (as tool), `get_inventory`, `add_item`, `remove_item` (3 direct + 2 agent-as-tool = 5 entries) | Orchestrator |
 | Rules Referee | `skill_check`, `roll_dice`, `check_can_afford`, `earn_gold`, `spend_gold`, `change_hp` (6 total) | Agent-as-tool specialist |
 | Lore Keeper | `set_location`, `set_quest`, `update_summary`, `get_inventory` (4 total) | Agent-as-tool specialist |
 | Critic | `get_inventory` (1 total — read-only) | Review pipeline |
@@ -710,6 +719,12 @@ verdict, just a `startswith`.
 The Critic has the smallest tool surface of any agent in the project: one
 read-only tool. This is deliberate. Its job is to inspect; no mutation tool
 should be within reach.
+
+(`save_game` and `load_game` do not appear in any agent's tool list. They were
+agent tools at the end of M5 but were retired before M6 was shipped — autosave
+makes `save_game` a no-op, and `load_game` never actually restored state. Named
+checkpoints, introduced post-M6 as a deterministic console command, replace them.
+See `tools/game_tools.py` for the removal note.)
 
 ---
 

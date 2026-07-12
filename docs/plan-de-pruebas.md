@@ -1,7 +1,7 @@
 # Plan de Pruebas — Dungeon Agents (M1-M6)
 
 > **Documento:** Plan de pruebas funcional y exploratorio  
-> **Alcance:** Milestones M1 a M6 (completados a fecha 2026-07-12)  
+> **Alcance:** Milestones M1 a M6 + mejoras post-M6 (completados a fecha 2026-07-12)  
 > **Proyecto:** Dungeon Agents — consola RPG en Python para aprender patrones de
 > agentes de IA; puente a QA/TestOps AI  
 > **Autor:** Antonio Gomez Gallardo
@@ -17,6 +17,8 @@
    - 4.1 [Arranque y configuracion](#41-arranque-y-configuracion)
    - 4.2 [Meta-comandos deterministicos](#42-meta-comandos-deterministicos)
    - 4.3 [Persistencia y sesion](#43-persistencia-y-sesion)
+   - 4.3b [Arranque con partida guardada — menu de inicio (post-M6)](#43b-arranque-con-partida-guardada--menu-de-inicio-post-m6)
+   - 4.3c [Checkpoints con nombre (post-M6)](#43c-checkpoints-con-nombre-post-m6)
    - 4.4 [Reglas de dominio — inventario y recursos](#44-reglas-de-dominio--inventario-y-recursos)
    - 4.5 [Mecanica de dados y skill_check](#45-mecanica-de-dados-y-skill_check)
    - 4.6 [Coordinacion multi-agente](#46-coordinacion-multi-agente)
@@ -44,6 +46,7 @@ actual, correspondiente a los Milestones M1 a M6 inclusive:
 | M4 | Reglas de dominio: inventario, oro, HP, condiciones de victoria/derrota |
 | M5 | Gestion de sesion: persistencia unificada, meta-comandos, modo debug, UX |
 | M6 | Arquitectura multi-agente: Rules Referee, Lore Keeper, Critic, pipeline de revision |
+| Post-M6 | Menu de arranque; confirmacion antes de borrar; checkpoints con nombre (SaveSlot); fix del loop de meta-comandos; retirada de save_game/load_game |
 
 ### Que NO se prueba (fuera de alcance)
 
@@ -102,17 +105,17 @@ Variables adicionales (todas opcionales):
 
 Si `DUNGEON_PROVIDER` tiene un valor desconocido, la aplicacion lo ignora y
 usa el proveedor por defecto (`anthropic`) sin lanzar error
-(`config.py:80-81`).
+(`config.py`, `load_settings`).
 
 ### 2.3 Modelos por defecto
 
-- Anthropic: `claude-haiku-4-5` (`config.py:36`)
-- OpenAI: `gpt-4o-mini` (`config.py:37`)
+- Anthropic: `claude-haiku-4-5` (`config.py`, `DEFAULT_MODELS`)
+- OpenAI: `gpt-4o-mini` (`config.py`, `DEFAULT_MODELS`)
 
 ### 2.4 Modos de operacion
 
 **Modo sin API key** (tests deterministicos):
-- `python -m pytest -m "not llm"` ejecuta los 119 tests existentes sin
+- `python -m pytest -m "not llm"` ejecuta los 125 tests existentes sin
   necesitar ninguna API key ni acceso a red.
 - El propio juego (`dungeon-agents`) muestra un mensaje de error claro y sale
   sin colgarse si falta la key.
@@ -132,6 +135,12 @@ Remove-Item "data\game_state.json" -ErrorAction SilentlyContinue
 ```
 
 O bien usar el comando `new` dentro del juego.
+
+Los checkpoints con nombre se guardan en `data\saves\`. Para limpiarlos todos:
+
+```powershell
+Remove-Item "data\saves\*" -ErrorAction SilentlyContinue
+```
 
 ### 2.6 Activar modo debug
 
@@ -166,15 +175,15 @@ python -m pytest -v                    # verboso
 **Oraculo:** fuerte. Dado un input concreto, el resultado esperado es exacto y
 determinista. Estas pruebas pueden fallar solo si el codigo cambia.
 
-**Cobertura actual:** 119 tests, todos pasando sin API key.
+**Cobertura actual:** 125 tests, todos pasando sin API key.
 
 | Modulo | Tests | Archivo |
 |--------|-------|---------|
 | Humo / configuracion | 10 | `test_smoke.py` |
-| Dados y skill_check | 12 | `test_dice.py` |
-| Persistencia | 9 | `test_state.py` |
+| Dados y skill_check | 18 | `test_dice.py` |
+| Persistencia + checkpoints | 15 | `test_state.py` |
 | Modelos Pydantic | 21 | `test_models.py` |
-| Reglas de dominio | 29 | `test_rules.py` |
+| Reglas de dominio | 38 | `test_rules.py` |
 | Contrato Rules Referee | 7 | `test_rules_referee.py` |
 | Contrato Lore Keeper | 5 | `test_lore_keeper.py` |
 | Contrato Critic | 6 | `test_critic.py` |
@@ -224,6 +233,7 @@ Convencion de IDs:
 - `DA-CFG-xx` — Configuracion y arranque
 - `DA-CMD-xx` — Meta-comandos
 - `DA-PER-xx` — Persistencia y sesion
+- `DA-CHK-xx` — Checkpoints con nombre (post-M6)
 - `DA-REG-xx` — Reglas de dominio
 - `DA-DAD-xx` — Dados y skill_check
 - `DA-MAG-xx` — Coordinacion multi-agente
@@ -252,9 +262,9 @@ Tipo:
 - `settings.has_api_key` devuelve `False` (verificado en `test_smoke.py`).
 - El juego imprime `No ANTHROPIC_API_KEY found.` (o la variable del proveedor
   activo) junto con instrucciones para crear `.env`, y retorna sin colgarse
-  (`main.py:367-374`).
+  (`main.py`, `run`).
 
-**Referencia:** `src/dungeon_agents/config.py:61-63`, `src/dungeon_agents/main.py:367-374`
+**Referencia:** `src/dungeon_agents/config.py` (`Settings.has_api_key`), `src/dungeon_agents/main.py` (`run`)
 
 ---
 
@@ -272,7 +282,7 @@ Tipo:
 **Pasos:** `DUNGEON_PROVIDER=openai OPENAI_API_KEY=sk-test` + `load_settings()`.  
 **Resultado esperado:** `provider == "openai"`, `model == "gpt-4o-mini"`, `api_key == "sk-test"`.
 
-**Referencia:** `src/dungeon_agents/config.py:35-44`
+**Referencia:** `src/dungeon_agents/config.py` (`DEFAULT_MODELS`, `API_KEY_ENV`)
 
 ---
 
@@ -298,7 +308,7 @@ Tipo:
 **Pasos:** ejecutar `python -m pytest tests/test_smoke.py::test_debug_flag_reads_truthy_env`.  
 **Resultado esperado:** `DUNGEON_DEBUG=1` -> `debug is True`; `DUNGEON_DEBUG=off` -> `debug is False`.
 
-**Referencia:** `src/dungeon_agents/config.py:48`, constantes `_TRUTHY = {"1", "true", "yes", "on"}`.
+**Referencia:** `src/dungeon_agents/config.py` (`_TRUTHY = {"1", "true", "yes", "on"}`).
 
 ---
 
@@ -312,7 +322,7 @@ Tipo:
 
 **Resultado esperado:** El panel muestra `anthropic - claude-haiku-4-5  |  debug ON`
 (o el proveedor/modelo configurados). Si debug esta apagado, la parte `| debug ON`
-no aparece (`main.py:390-399`).
+no aparece (`main.py`, `run`, panel de bienvenida).
 
 ---
 
@@ -320,7 +330,7 @@ no aparece (`main.py:390-399`).
 
 **Objetivo:** verificar que el arranque no parece colgarse en el primer import del SDK.  
 **Pasos:** borrar la cache de Python (`.pyc`) y arrancar el juego con API key por primera vez.  
-**Resultado esperado:** aparece el mensaje de estado `Loading the game engine (first run can take a moment)` durante los ~20 s de carga inicial, antes del banner (`main.py:380`).
+**Resultado esperado:** aparece el mensaje de estado `Loading the game engine (first run can take a moment)` durante los ~20 s de carga inicial, antes del banner (`main.py`, `run`, spinner de carga).
 
 ---
 
@@ -350,7 +360,7 @@ establecido, aparece `not set yet` (comportamiento correcto, no un fallo).
 **Resultado inesperado (fallo):** los valores difieren del JSON, o el panel muestra
 valores que el GM invento sin llamar al tool.
 
-**Referencia:** `src/dungeon_agents/main.py:105-138`, `src/dungeon_agents/domain/state.py:91-109`
+**Referencia:** `src/dungeon_agents/main.py` (`_print_status`), `src/dungeon_agents/domain/state.py` (`load_state_or_none`)
 
 ---
 
@@ -359,7 +369,7 @@ valores que el GM invento sin llamar al tool.
 **Pasos:** escribir `status` en lugar de `stats`.  
 **Resultado esperado:** identico a DA-CMD-01.
 
-**Referencia:** `src/dungeon_agents/main.py:27` (`STATS_WORDS = {"stats", "status", "/stats"}`)
+**Referencia:** `src/dungeon_agents/main.py` (`STATS_WORDS = {"stats", "status", "/stats"}`)
 
 ---
 
@@ -371,7 +381,7 @@ valores que el GM invento sin llamar al tool.
 **Resultado esperado:** panel azul "Inventory" con los objetos y cantidades
 exactas del estado guardado. Sin panel "Stats" de HP/gold.
 
-**Referencia:** `src/dungeon_agents/main.py:138`, `src/dungeon_agents/domain/rules.py:34-43`
+**Referencia:** `src/dungeon_agents/main.py` (`_print_status`), `src/dungeon_agents/domain/rules.py` (`get_inventory`)
 
 ---
 
@@ -382,7 +392,7 @@ exactas del estado guardado. Sin panel "Stats" de HP/gold.
 del estado guardado. Si aun no hay resumen, muestra `Nothing notable has happened
 yet.` — nunca un texto inventado en tiempo real.
 
-**Referencia:** `src/dungeon_agents/main.py:140-153`
+**Referencia:** `src/dungeon_agents/main.py` (`_print_summary`)
 
 ---
 
@@ -395,7 +405,7 @@ recupera su contexto sin perder el lugar.
 2. Escribir `stats`, luego `inventory`, luego `summary`, luego `help`.
 
 **Resultado esperado:** despues de cada meta-comando se reimprime la ultima escena
-del GM. El jugador puede continuar jugando desde el mismo punto (`main.py:476-500`).
+del GM. El jugador puede continuar jugando desde el mismo punto (`main.py`, `run`, loop de meta-comandos).
 
 ---
 
@@ -403,8 +413,9 @@ del GM. El jugador puede continuar jugando desde el mismo punto (`main.py:476-50
 
 **Pasos:** escribir `help` (o `?`).  
 **Resultado esperado:** panel amarillo "Help" con los comandos `stats`, `inventory`,
-`summary`, `help`, `save`, `new`, `debug`, `exit` listados con sus alias (`main.py:49-95`).
-No consume un turno de juego.
+`summary`, `help`, `save <name>`, `load <name>`, `saves`, `new`, `debug`, `exit`
+listados con sus alias (`main.py`, `HELP_TEXT`). No consume un turno de juego.
+Tras mostrar la ayuda, se reimprime la ultima escena del GM.
 
 ---
 
@@ -419,7 +430,7 @@ No consume un turno de juego.
 
 **Resultado esperado:** el toggle funciona en caliente sin reiniciar el juego;
 los hooks existentes leen el estado mutable `DebugState` sin necesidad de
-reconstruir el agente (`main.py:310-319`, `main.py:504-510`).
+reconstruir el agente (`main.py`, `_build_tool_hooks` y `DebugState`).
 
 ---
 
@@ -435,7 +446,7 @@ spinner de carga ni errores. El estado guardado se conserva en disco.
 
 **Pasos:** pulsar Enter sin escribir nada.  
 **Resultado esperado:** la aplicacion vuelve al prompt de input sin enviar nada
-al GM y sin mostrar ninguna escena nueva (`main.py:511-512`).
+al GM y sin mostrar ninguna escena nueva (`main.py`, `run`, bloque entrada vacía).
 
 ---
 
@@ -447,7 +458,7 @@ al GM y sin mostrar ninguna escena nueva (`main.py:511-512`).
 **Pasos:** ejecutar `python -m pytest tests/test_state.py::test_save_state_then_load_state_roundtrips`.  
 **Resultado esperado:** los modelos Pydantic son iguales por valor.
 
-**Referencia:** `src/dungeon_agents/domain/state.py:51-65`
+**Referencia:** `src/dungeon_agents/domain/state.py` (`save_state`)
 
 ---
 
@@ -472,7 +483,7 @@ descarta silenciosamente y se trata como "sin guardado".
 **Pasos:** `python -m pytest tests/test_state.py::test_load_state_or_none_discards_incompatible_save`.  
 **Resultado esperado:** `load_state_or_none()` devuelve `None` sin `StateError`.
 
-**Referencia:** `src/dungeon_agents/domain/state.py:91-109`
+**Referencia:** `src/dungeon_agents/domain/state.py` (`load_state_or_none`)
 
 ---
 
@@ -497,25 +508,40 @@ escena exacta que el jugador vio — sin improvisar.
 - Panel cyan "Recap" con nombre/location/HP/gold/quest y `session_summary`.
 - A continuacion, la ultima escena del GM *verbatim* (texto identico al anotado).
 - El GM continua la aventura sin reiniciarla (porque recibe `RESUME_PROMPT`,
-  `main.py:34-35`).
+  `main.py`).
 
-**Referencia:** `src/dungeon_agents/main.py:288-302`, `main.py:409-417`
+**Referencia:** `src/dungeon_agents/main.py` (`_resume_banner`, `RESUME_PROMPT`, `run`, arranque con guardado)
 
 ---
 
-#### DA-PER-07 — Comando `new` descarta el guardado y comienza partida fresca [MANUAL]
+#### DA-PER-07 — Comando `new` pide confirmacion y luego descarta el guardado [MANUAL]
 
-**Objetivo:** `new` borra el estado actual y siembra uno nuevo desde cero.  
-**Pasos:**
+**Objetivo:** `new` muestra una confirmacion antes de borrar, y solo descarta si
+el jugador confirma con `y`/`yes`.  
+**Pasos (confirmacion):**
 1. Jugar varios turnos con oro, inventario y HP modificados.
 2. Escribir `new`.
-3. Escribir `stats`.
+3. Cuando aparezca `Start a new adventure? Your current game will be lost. (y/N):`
+   responder `y`.
+4. Escribir `stats`.
 
-**Resultado esperado:**
+**Resultado esperado (al confirmar):**
 - Mensaje `Starting a new adventure...`
 - El panel Stats muestra el heroe `Adventurer` con HP 100/100, gold 0 e
-  inventario vacio (el estado inicial que genera `new_game_state()`, `game_tools.py:24-32`).
+  inventario vacio (el estado inicial que genera `new_game_state()`, `game_tools.py`).
 - El historial de conversacion se resetea; el GM introduce una nueva apertura.
+
+**Pasos (cancelacion):**
+1. Jugar varios turnos.
+2. Escribir `new`.
+3. Responder `n` (o pulsar Enter directamente).
+
+**Resultado esperado (al cancelar):**
+- Mensaje `Keeping your current adventure.`
+- Se reimprime la ultima escena del GM.
+- El estado en disco no cambia; los valores de `stats` son los mismos que antes.
+
+**Referencia:** `src/dungeon_agents/main.py` (`_confirm` + bloque `new`)
 
 ---
 
@@ -541,6 +567,203 @@ ambas sesiones.
 
 **Pasos:** `python -m pytest tests/test_state.py::test_load_state_rejects_schema_mismatch`.  
 **Resultado esperado:** un JSON con `hp: -50` lanza `StateError`.
+
+---
+
+### 4.3b Arranque con partida guardada — menu de inicio (post-M6)
+
+#### DA-CFG-09 — Menu de arranque aparece solo si hay partida guardada [MANUAL]
+
+**Objetivo:** con partida guardada el juego pregunta continuar/nueva; sin
+partida arranca directamente sin menu.  
+**Pasos (con partida):**
+1. Asegurarse de que `data/game_state.json` existe (haber jugado antes).
+2. Arrancar el juego.
+
+**Resultado esperado:** panel verde "Welcome back" con el texto `A saved adventure
+was found. Type continue to resume it, or new to start over.` y prompt
+`Load saved game? (continue/new):`.
+
+**Pasos (sin partida):**
+1. Borrar `data/game_state.json`.
+2. Arrancar el juego.
+
+**Resultado esperado:** no aparece menu; el juego arranca directamente con la
+escena de apertura del GM. No hay pregunta de continuar/nueva.
+
+**Referencia:** `src/dungeon_agents/main.py` (`run`, menú de arranque)
+
+---
+
+#### DA-CFG-10 — Elegir `continue` reanuda la partida exactamente [MANUAL]
+
+**Objetivo:** verificar que `continue` en el menu de arranque es equivalente a
+reanudar normalmente (recap + ultima escena verbatim).  
+**Pasos:**
+1. Con partida guardada, arrancar y responder `continue`.
+
+**Resultado esperado:** mismo comportamiento que DA-PER-06 (panel Recap + ultima
+escena verbatim).
+
+---
+
+#### DA-CFG-11 — Elegir `new` en el arranque pide confirmacion antes de borrar [MANUAL]
+
+**Objetivo:** responder `new` en el menu de arranque no descarta la partida sin
+confirmar.  
+**Pasos:**
+1. Con partida guardada, arrancar y responder `new`.
+2. Cuando aparezca la confirmacion `Start a new adventure? Your current game
+   will be lost. (y/N):` responder `n`.
+
+**Resultado esperado:** el juego reanuda la partida existente en lugar de
+borrarla (`_resume_banner` mostrado, estado conservado).
+
+**Pasos (confirmar el borrado):**
+1. Repetir y responder `y`.
+
+**Resultado esperado:** el juego arranca con partida nueva; el estado anterior
+ha sido descartado. Escribir `stats` muestra `Adventurer` con valores iniciales.
+
+**Referencia:** `src/dungeon_agents/main.py` (`run`, bloque `else` del arranque con confirmacion `_confirm`)
+
+---
+
+### 4.3c Checkpoints con nombre (post-M6)
+
+Los checkpoints son instantaneas manuales con nombre que el jugador crea con
+`save <nombre>`. A diferencia del autoguardado (una unica linea temporal que se
+sobreescribe con cada accion), un checkpoint NO se sobreescribe, y es el unico
+mecanismo para volver a un punto anterior exacto. El checkpoint captura las dos
+mitades del estado del agente: `GameState` (datos validados) y la historia de
+conversacion (memoria del modelo).
+
+---
+
+#### DA-CHK-01 — `save <nombre>` crea un checkpoint y `saves` lo lista [AUTO + MANUAL]
+
+**[AUTO]:** `python -m pytest tests/test_state.py::test_checkpoint_roundtrips_state_and_conversation tests/test_state.py::test_list_checkpoints_returns_saved_names`  
+**Resultado esperado:** ambos tests pasan; el checkpoint guarda estado y conversacion exactos y aparece en la lista.
+
+**[MANUAL]:**
+1. Jugar hasta tener estado definido (oro, inventario).
+2. Escribir `save antes-del-jefe`.
+3. Escribir `saves`.
+
+**Resultado esperado:** confirmacion `Saved checkpoint 'antes-del-jefe'.` y un
+panel "Saved checkpoints" que lista el nombre. Se reimprime la ultima escena
+despues del comando.
+
+**Referencia:** `src/dungeon_agents/domain/state.py` (`save_checkpoint`), `main.py` (`_save_checkpoint`, `_list_checkpoints`)
+
+---
+
+#### DA-CHK-02 — `load <nombre>` restaura estado Y conversacion exactos [AUTO + MANUAL]
+
+**[AUTO]:** `python -m pytest tests/test_state.py::test_checkpoint_roundtrips_state_and_conversation`  
+**Resultado esperado:** `loaded.state.player.gold`, `loaded.state.location` y `loaded.conversation` son identicos a los guardados.
+
+**[MANUAL]:**
+1. Guardar un checkpoint con `save punto-a`.
+2. Continuar jugando (perder oro, tomar dano).
+3. Escribir `load punto-a`.
+4. Escribir `stats`.
+
+**Resultado esperado:** panel Recap con los valores del momento del checkpoint;
+`stats` muestra exactamente esos valores. El Game Master continua desde el
+punto guardado con su memoria completa (la conversacion restaurada), no desde
+un `RESUME_PROMPT` generico.
+
+**Resultado inesperado (fallo):** los valores actuales (post-checkpoint) en
+lugar de los del checkpoint; o el GM improvisa un resumen en lugar de recordar
+el contexto exacto.
+
+**Referencia:** `src/dungeon_agents/main.py` (`run`, bloque `load`)
+
+---
+
+#### DA-CHK-03 — `load <nombre>` con nombre inexistente falla con gracia [AUTO + MANUAL]
+
+**[AUTO]:** `python -m pytest tests/test_state.py::test_load_missing_checkpoint_returns_none`  
+**Resultado esperado:** `load_checkpoint("nope", ...)` devuelve `None`.
+
+**[MANUAL]:** escribir `load nombre-que-no-existe`.  
+**Resultado esperado:** mensaje `No checkpoint named 'nombre-que-no-existe'
+(or it was incompatible).` El juego continua; el estado actual no cambia.
+
+**Referencia:** `src/dungeon_agents/domain/state.py` (`load_checkpoint`), `main.py` (`run`, bloque `load`)
+
+---
+
+#### DA-CHK-04 — El nombre del checkpoint se sanea: no hay path traversal [AUTO]
+
+**Objetivo:** un nombre malicioso como `../../evil` no puede escapar del
+directorio de guardados.  
+**Pasos:** `python -m pytest tests/test_state.py::test_checkpoint_name_is_sanitized_to_a_safe_file`  
+**Resultado esperado:** el archivo se escribe dentro del directorio `data/saves/`
+con el nombre saneado (`evil.json`); no se escribe ningun archivo fuera de ese
+directorio.
+
+**Referencia:** `src/dungeon_agents/domain/state.py` (`_safe_slot_filename`)
+
+---
+
+#### DA-CHK-05 — Un nombre totalmente ilegal lanza StateError [AUTO]
+
+**Objetivo:** un nombre formado solo por caracteres ilegales (p. ej. `../`) falla
+de forma ruidosa en lugar de escribir un fichero vacio o de nombre extrano.  
+**Pasos:** `python -m pytest tests/test_state.py::test_checkpoint_all_illegal_name_raises`  
+**Resultado esperado:** `StateError` con mensaje que explica que el nombre no es
+utilizable.
+
+**Referencia:** `src/dungeon_agents/domain/state.py` (`_safe_slot_filename`)
+
+---
+
+#### DA-CHK-06 — Un checkpoint con esquema incompatible carga como None [AUTO]
+
+**Objetivo:** si una version futura del SDK cambia el formato de la conversacion
+y un checkpoint guardado no pasa la validacion, el juego lo reporta como "no
+encontrado" en lugar de crashear.  
+**Pasos:** `python -m pytest tests/test_state.py::test_load_incompatible_checkpoint_returns_none`  
+**Resultado esperado:** `load_checkpoint("broken", ...)` devuelve `None`.
+
+**Referencia:** `src/dungeon_agents/domain/state.py` (`load_checkpoint`)
+
+---
+
+#### DA-CHK-07 — `save` sin nombre muestra instrucciones de uso [MANUAL]
+
+**Pasos:** escribir `save` (sin nombre).  
+**Resultado esperado:** mensaje `Usage: save <name> (e.g. save battle).` El
+juego no crashea; se reimprime la ultima escena.
+
+**Referencia:** `src/dungeon_agents/main.py` (`run`, bloque `save` sin nombre)
+
+---
+
+#### DA-CHK-08 — Meta-comandos save/load/saves NO llaman al Game Master [MANUAL]
+
+**Objetivo:** verificar el fix del loop — tras un meta-comando de checkpoint, el
+modelo NO se invoca. No debe aparecer `[debug] agent Game Master is working...`
+ni una escena nueva vacia.  
+**Precondicion:** modo debug activo.  
+**Pasos:**
+1. Activar debug (`debug`).
+2. Escribir `saves`.
+3. Escribir `save prueba`.
+4. Escribir `load prueba`.
+
+**Resultado esperado:** en ninguno de los tres comandos aparece la linea
+`[debug] agent Game Master is working...` ni ninguna escena generada por el
+modelo. Solo se muestran paneles deterministicos (lista de checkpoints,
+confirmacion de guardado, Recap). La escena del GM se reimprime (desde
+`_last_scene`), pero es la misma escena ya mostrada — no una nueva generacion.
+
+**Resultado inesperado (fallo):** cualquier linea `[debug] agent ...` o una
+escena que difiera de la ya mostrada antes del comando.
+
+**Referencia:** `src/dungeon_agents/main.py` (`run`, ramas save/load/saves en el loop; ningun bloque llama a `_play_turn`)
 
 ---
 
@@ -620,7 +843,7 @@ debe narrar esa restriccion).
 - Dano de 999 en HP=10 deja HP=0 y el mensaje incluye `"fallen"`.
 - Curacion de 999 en HP=95 deja HP=100 (MAX_HP).
 
-**Referencia:** `src/dungeon_agents/domain/rules.py:226-245` (`max(0, min(player.hp + delta, player.max_hp))`)
+**Referencia:** `src/dungeon_agents/domain/rules.py` (`change_hp`)
 
 ---
 
@@ -659,7 +882,7 @@ debe narrar esa restriccion).
 **Pasos:** `python -m pytest tests/test_dice.py::test_out_of_range_sides_are_rejected`.  
 **Resultado esperado:** `sides` en {1, 0, -5, 101, 1000} lanzan `InvalidDiceError`.
 
-**Referencia:** `src/dungeon_agents/domain/dice.py:19-23` (`MIN_SIDES=2, MAX_SIDES=100`)
+**Referencia:** `src/dungeon_agents/domain/dice.py` (`MIN_SIDES=2, MAX_SIDES=100`)
 
 ---
 
@@ -667,7 +890,7 @@ debe narrar esa restriccion).
 
 **Pasos:** `python -m pytest tests/test_dice.py::test_non_integer_sides_are_rejected`.  
 **Resultado esperado:** todos lanzan `InvalidDiceError` (incluido `True`, que es
-subclase de `int` pero se rechaza explicitamente, `dice.py:41-42`).
+subclase de `int` pero se rechaza explicitamente, `domain/dice.py`, `roll_dice`).
 
 ---
 
@@ -676,7 +899,7 @@ subclase de `int` pero se rechaza explicitamente, `dice.py:41-42`).
 **Pasos:** `python -m pytest tests/test_dice.py::test_check_succeeds_when_roll_meets_threshold tests/test_dice.py::test_check_fails_when_roll_below_threshold tests/test_dice.py::test_check_success_is_meet_or_exceed`.  
 **Resultado esperado:** exito cuando roll >= threshold (>=, no >); fallo cuando roll < threshold.
 
-**Referencia:** `src/dungeon_agents/domain/dice.py:67-73` (umbrales: trivial=3, easy=5, moderate=10, hard=15, very_hard=18)
+**Referencia:** `src/dungeon_agents/domain/dice.py` (`DIFFICULTY_THRESHOLDS`: trivial=3, easy=5, moderate=10, hard=15, very_hard=18)
 
 ---
 
@@ -712,7 +935,7 @@ El narrador describe el resultado que el tool devolvio, no uno inventado.
 #### DA-DAD-09 — El tool `skill_check` expuesto al Referee devuelve formato legible [AUTO indirecto]
 
 **Objetivo:** verificar el formato de respuesta del tool wrapper.  
-**Pasos (indirectos):** leer `src/dungeon_agents/tools/game_tools.py:219-241` y
+**Pasos (indirectos):** leer `src/dungeon_agents/tools/game_tools.py` (`skill_check`) y
 ejecutar `python -m pytest tests/test_dice.py` para confirmar que la logica
 subyacente es correcta.  
 **Resultado esperado:** la cadena devuelta tiene el formato
@@ -751,14 +974,14 @@ subyacente es correcta.
 **Resultado esperado:** `CRITIC_OK` y `CRITIC_PROBLEM_PREFIX` aparecen en
 `CRITIC_INSTRUCTIONS`; el loop (`main.py`) parsea estas cadenas, no un modelo.
 
-**Referencia:** `src/dungeon_agents/agents/critic.py:35-36`
+**Referencia:** `src/dungeon_agents/agents/critic.py` (`CRITIC_OK`, `CRITIC_PROBLEM_PREFIX`)
 
 ---
 
 #### DA-MAG-05 — El tope de reintentos del Critic es un entero >= 0 [AUTO]
 
 **Pasos:** `python -m pytest tests/test_critic.py::test_retry_cap_is_bounded`.  
-**Resultado esperado:** `MAX_SCENE_RETRIES` es un entero (`main.py:43`, actualmente `1`).
+**Resultado esperado:** `MAX_SCENE_RETRIES` es un entero (`main.py`, `MAX_SCENE_RETRIES`, actualmente `1`).
 
 ---
 
@@ -773,7 +996,7 @@ subyacente es correcta.
 **Resultado esperado:** aparece `[debug] Critic verdict: OK` (o un mensaje de
 regeneracion si el Critic encontro una contradiccion). El Critic siempre actua;
 su ejecucion es parte del codigo del loop, no dependiente del modelo
-(`main.py:424-447`).
+(`main.py`, `_play_turn`).
 
 ---
 
@@ -795,7 +1018,7 @@ seguido de `[debug] regenerating scene (Critic: ...)`, y una nueva escena cohere
 con el estado real. Si el Critic da OK, la escena se muestra sin regenerar.
 
 **Resultado esperado (si MAX_SCENE_RETRIES se alcanza):** la escena se muestra
-de todas formas (el tope anti-bucle actua; `main.py:425-444`).
+de todas formas (el tope anti-bucle actua; `main.py`, `_play_turn`).
 
 ---
 
@@ -852,7 +1075,7 @@ guardan y sobreviven a un reinicio.
 **Objetivo:** si el heroe tiene HP=0 Y la quest esta completada, el resultado
 es "lost", no "won".  
 **Pasos:** `python -m pytest tests/test_end_of_game.py::test_defeat_takes_precedence_over_victory`.  
-**Resultado esperado:** `"lost"` (el codigo evalua `is_game_over` primero; `main.py:205-208`).
+**Resultado esperado:** `"lost"` (el codigo evalua `is_game_over` primero; `main.py`, `_check_end_of_game`).
 
 ---
 
@@ -875,7 +1098,7 @@ el Lore Keeper haya establecido una quest.
 2. Verificar en `data/game_state.json` que `active_quest.completed` es `true`.
 
 **Resultado esperado:**
-- Panel verde con titulo "The End" y texto de victoria (`main.py:212-218`).
+- Panel verde con titulo "The End" y texto de victoria (`main.py`, `_print_end_of_game`).
 - Mensaje `Type new next time to begin a fresh adventure.`
 - El loop termina; el juego no sigue pidiendo input.
 
@@ -890,7 +1113,7 @@ el Lore Keeper haya establecido una quest.
 3. Verificar en `data/game_state.json` que `player.hp` es `0`.
 
 **Resultado esperado:**
-- Panel rojo con titulo "Game Over" y texto de derrota (`main.py:219-224`).
+- Panel rojo con titulo "Game Over" y texto de derrota (`main.py`, `_print_end_of_game`).
 - Mensaje `Type new next time to begin a fresh adventure.`
 - El loop termina.
 
@@ -931,7 +1154,7 @@ exclusivamente en el `GameState`, sin consultar al modelo.
 
 **Pasos:** pulsar Ctrl+C en el prompt de input del jugador.  
 **Resultado esperado:** mensaje `Farewell, adventurer.` y salida limpia sin
-traceback. El estado guardado en disco no se corrompe (`main.py:465-467`,
+traceback. El estado guardado en disco no se corrompe (`main.py`, `run`,
 captura `KeyboardInterrupt`).
 
 ---
@@ -946,10 +1169,10 @@ captura `KeyboardInterrupt`).
 #### DA-ROB-06 — Dificultad invalida en `skill_check` devuelve mensaje de error, no crash [MANUAL/INDIRECTO]
 
 **Objetivo:** si el modelo pasa una dificultad desconocida, el tool wrapper
-(`game_tools.py:219-241`) captura `InvalidDifficultyError` y devuelve un string
+(`game_tools.py`, `skill_check`) captura `InvalidDifficultyError` y devuelve un string
 de error al modelo en lugar de propagar la excepcion.  
 **Pasos:**
-- Lectura del codigo: `game_tools.py:232-234` captura la excepcion y devuelve
+- Lectura del codigo: `game_tools.py` (`skill_check`) captura la excepcion y devuelve
   `f"Invalid difficulty: {exc}"`.
 - No es necesario test adicional; la logica de la excepcion esta cubierta por `test_dice.py`.
 
@@ -961,20 +1184,20 @@ puede adaptar su respuesta; el juego no se detiene.
 #### DA-ROB-07 — Dados fuera de rango devuelven mensaje de error, no crash [MANUAL/INDIRECTO]
 
 **Objetivo:** igual que DA-ROB-06 pero para `roll_dice`.  
-**Referencia:** `game_tools.py:69-73` captura `InvalidDiceError`.
+**Referencia:** `game_tools.py` (`roll_dice`) captura `InvalidDiceError`.
 
 ---
 
 #### DA-ROB-08 — `set_location` con nombre vacio devuelve mensaje de error [AUTO indirecto]
 
-**Pasos:** leer `game_tools.py:275-276`: `if not location: return "A location needs a name."`.  
+**Pasos:** leer `game_tools.py` (`set_location`): `if not location: return "A location needs a name."`.  
 **Resultado esperado:** el tool no muta el estado; el modelo recibe una razon y puede solicitar un nombre valido.
 
 ---
 
 #### DA-ROB-09 — `set_quest` con titulo vacio devuelve mensaje de error [AUTO indirecto]
 
-**Referencia:** `game_tools.py:294-295`: `if not title: return "A quest needs a title."`.
+**Referencia:** `game_tools.py` (`set_quest`): `if not title: return "A quest needs a title."`.
 
 ---
 
@@ -992,13 +1215,13 @@ dentro de un hook aborta la llamada al tool.
 **Resultado esperado:** ninguna salida del propio codigo de la aplicacion (paneles,
 mensajes de debug, mensajes de meta-comandos) provoca `UnicodeEncodeError`. El
 texto del modelo puede contener caracteres no-ASCII; lo que importa es que el
-codigo de la aplicacion no los inyecta (`main.py:339-342`).
+codigo de la aplicacion no los inyecta (`main.py`, `_build_tool_hooks`).
 
 ---
 
 #### DA-WIN-02 — El fichero de estado se escribe y lee como UTF-8 [AUTO indirecto]
 
-**Referencia:** `state.py:64` usa `encoding="utf-8"` en la escritura y `state.py:83`
+**Referencia:** `domain/state.py` (`save_state`) usa `encoding="utf-8"` en la escritura y `domain/state.py` (`load_state`)
 en la lectura. Los modelos Pydantic pueden contener unicode si el modelo lo
 genera; la capa de persistencia no lo corrompe.
 
@@ -1028,6 +1251,11 @@ genera; la capa de persistencia no lo corrompe.
 | Pipeline Critic (generar -> revisar -> regenerar, MAX_SCENE_RETRIES) | M6 | DA-MAG-04 a DA-MAG-07 |
 | Fin de partida detectado por codigo (victoria/derrota/precedencia) | M6 | DA-FIN-01 a DA-FIN-08 |
 | HP y oro persisten entre sesiones (fix M6) | M6 | DA-PER-08, DA-MAG-09 |
+| Menu de arranque continuar/nueva + confirmacion antes de borrar | Post-M6 | DA-CFG-09, DA-CFG-10, DA-CFG-11 |
+| Confirmacion antes de borrar en comando `new` mid-game | Post-M6 | DA-PER-07 (actualizado) |
+| Checkpoints con nombre (SaveSlot: estado + conversacion) | Post-M6 | DA-CHK-01 a DA-CHK-08 |
+| Nombre de checkpoint saneado (bounded write, no path traversal) | Post-M6 | DA-CHK-04, DA-CHK-05 |
+| Fix del loop: meta-comandos no llaman al modelo | Post-M6 | DA-CHK-08, DA-CMD-05 |
 
 ---
 
@@ -1159,10 +1387,21 @@ Plantilla para anotar los resultados de cada ejecucion manual del plan.
 | DA-ROB-09 | set_quest titulo vacio | AUTO indirecto | PASS / FAIL | |
 | DA-WIN-01 | Solo ASCII en salida de codigo | MANUAL | PASS / FAIL | |
 | DA-WIN-02 | Persistencia en UTF-8 | AUTO indirecto | PASS / FAIL | |
+| DA-CFG-09 | Menu de arranque solo con partida guardada | MANUAL | PASS / FAIL | |
+| DA-CFG-10 | `continue` en arranque reanuda partida | MANUAL | PASS / FAIL | |
+| DA-CFG-11 | `new` en arranque pide confirmacion | MANUAL | PASS / FAIL | |
+| DA-CHK-01 | `save <nombre>` crea checkpoint y `saves` lo lista | AUTO + MANUAL | PASS / FAIL | |
+| DA-CHK-02 | `load <nombre>` restaura estado Y conversacion | AUTO + MANUAL | PASS / FAIL | |
+| DA-CHK-03 | `load` nombre inexistente falla con gracia | AUTO + MANUAL | PASS / FAIL | |
+| DA-CHK-04 | Nombre saneado: no hay path traversal | AUTO | PASS / FAIL | |
+| DA-CHK-05 | Nombre totalmente ilegal lanza StateError | AUTO | PASS / FAIL | |
+| DA-CHK-06 | Checkpoint incompatible carga como None | AUTO | PASS / FAIL | |
+| DA-CHK-07 | `save` sin nombre muestra instrucciones | MANUAL | PASS / FAIL | |
+| DA-CHK-08 | save/load/saves no llaman al modelo | MANUAL | PASS / FAIL | |
 
-**Total casos:** 68  
-**Automaticos (sin API key):** 44  
-**Manuales (con API key):** 24  
+**Total casos:** 81  
+**Automaticos (sin API key):** 50  
+**Manuales (con API key):** 31  
 
 ---
 

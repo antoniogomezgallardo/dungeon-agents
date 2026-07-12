@@ -155,8 +155,9 @@ pip install -e ".[dev]"
   depends on the model must fail honestly (visible gap), never deceptively
   (fabricated value). This is the most important agent lesson in the project and
   the strongest bridge to TestOps AI.
-  10 tools total (roll_dice, save_game, load_game, get_inventory, add_item,
-  remove_item, validate_action, update_summary, set_location, set_quest).
+  Note on save_game/load_game: these were introduced as M5 tool wrappers but were
+  retired post-M6 (see note below). At the end of M5, 10 tools existed including
+  them; they no longer exist as tools.
   81 deterministic tests (10 smoke + 12 dice + 9 state + 21 models + 29 rules),
   all passing without an API key.
 - **M6 — Multi-agent: DONE.** The single Game Master became an *orchestrator* of a
@@ -191,6 +192,29 @@ pip install -e ".[dev]"
   Reference doc:
   `docs/principios-y-patrones-de-agentes.md` (when to use agents, when not,
   non-negotiable principles, coordination patterns).
+- **Post-M6 fixes (on branch fix/session-ux-and-save-load, 125 tests):**
+  (1) Meta-command loop fix — after any meta-command (stats/inventory/help/saves/
+  save/load) the model is NOT invoked; scene generation only happens on the opening
+  scene, after `new`, and after a real player action. This eliminates spurious
+  empty-scene calls and "Game Master is working" messages on meta-commands.
+  (2) Startup menu — if a saved game exists, the game now presents a
+  continue/new choice before loading the SDK. Choosing `new` at the startup
+  prompt asks for confirmation before discarding. Without a save, starts directly.
+  (3) Named checkpoints (SaveSlot) — `save <name>` / `load <name>` / `saves`
+  console commands. `SaveSlot` model in `domain/models.py` bundles validated
+  `GameState` + conversation history (both halves of agent state). `save_checkpoint`
+  / `load_checkpoint` / `list_checkpoints` / `_safe_slot_filename` in `state.py`
+  (bounded write: name sanitized to safe filename, no path traversal). Checkpoints
+  live in `data/saves/`. 6 new tests in `test_state.py` (now 15 total).
+  (4) Retirement of save_game / load_game tools — these agent tools were no-ops
+  (autosave makes them redundant; load only narrated a summary without restoring
+  anything). Removed from `game_tools.py` and `game_master.py`. Save/load is now
+  a deterministic console command, not something the model manages. A comment in
+  `game_tools.py` explains the removal.
+  KEY LESSON (checkpoints): agent state = validated store + conversation memory.
+  Point-in-time restore requires both. `SaveSlot` captures both; restoring only
+  the `GameState` would give the model its old facts but no memory of how it got
+  there. This is the strongest transfer to TestOps AI in the project so far.
 - M7 — Guardrails & safety constraints: not started.
 - M8 — Evaluation & tests: not started.
 - M9 — Bridge to QA/TestOps AI (`docs/qa_migration_notes.md`): not started.

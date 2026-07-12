@@ -121,3 +121,31 @@ class ActionResult(BaseModel):
     new_state: GameState | None = Field(
         default=None, description="Resulting state, if the action changed it."
     )
+
+
+class SaveSlot(BaseModel):
+    """A named checkpoint: everything needed to restore a game EXACTLY (M6+).
+
+    The autosave (a single `game_state.json`) always holds the in-progress game.
+    A SaveSlot is a *manual* checkpoint the player names — and to restore the
+    exact point, it must carry both halves of a game:
+
+    - `state`: the validated GameState (HP, gold, inventory, location, quest,
+      last scene). Validating a SaveSlot validates this whole tree at once.
+    - `conversation`: the Game Master's message history (what `to_input_list()`
+      returns) as a list of plain dicts. Restoring it gives the model back its
+      exact memory, so the game continues from the saved moment rather than
+      re-improvising from a resume prompt.
+
+    `conversation` is typed loosely (list of dicts) on purpose: the SDK owns that
+    shape (it includes tool calls), and we persist it verbatim. If a future SDK
+    changes the shape, a load simply fails validation and is reported as an
+    incompatible checkpoint — an honest gap, not a crash.
+    """
+
+    name: str = Field(min_length=1, description="Checkpoint name; not empty.")
+    state: GameState = Field(description="The validated game state to restore.")
+    conversation: list[dict] = Field(
+        default_factory=list,
+        description="The Game Master's message history, restored verbatim.",
+    )
