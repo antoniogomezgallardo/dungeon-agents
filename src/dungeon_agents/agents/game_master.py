@@ -50,8 +50,8 @@ Rules:
     cannot lose an item they do not have — the tool will say so.
 - When a rule tool reports a failure, explain it to the player in a friendly,
   in-character way rather than ignoring it.
-- You may use `save_game` to persist progress and `load_game` to resume a saved
-  adventure.
+- Progress is saved automatically and the player controls saving/loading from the
+  console, so you do not manage saves yourself.
 - Never break character or mention that you are an AI or that you are using tools.
 - Keep the player in the driver's seat: end on their choices, not on a
   resolved conclusion.
@@ -102,9 +102,7 @@ def build_game_master(settings: Settings):
     from dungeon_agents.tools.game_tools import (
         add_item,
         get_inventory,
-        load_game,
         remove_item,
-        save_game,
     )
 
     # The SDK's tracing exports run traces to OpenAI's platform and require an
@@ -152,8 +150,6 @@ def build_game_master(settings: Settings):
         tools=[
             rules_referee_tool,  # <-- the Rules Referee agent, exposed as a tool
             lore_keeper_tool,    # <-- the Lore Keeper agent, exposed as a tool
-            save_game,
-            load_game,
             get_inventory,
             add_item,
             remove_item,

@@ -14,13 +14,16 @@ from pathlib import Path
 
 import pytest
 
-from dungeon_agents.domain.models import GameState, Player
+from dungeon_agents.domain.models import GameState, Player, SaveSlot
 from dungeon_agents.domain.state import (
     STATE_FILENAME,
     StateError,
     clear_state,
+    list_checkpoints,
+    load_checkpoint,
     load_state,
     load_state_or_none,
+    save_checkpoint,
     save_state,
 )
 
@@ -99,3 +102,63 @@ def test_clear_state_is_safe_when_no_save(tmp_path: Path) -> None:
     """clear_state on a missing file is a no-op, not an error."""
     clear_state(data_dir=tmp_path)  # should not raise
     assert not (tmp_path / STATE_FILENAME).exists()
+
+
+# --- Named checkpoints (manual save/load slots) ------------------------------
+
+def _slot(name: str = "battle") -> SaveSlot:
+    return SaveSlot(
+        name=name,
+        state=GameState(player=Player(name="Aria", gold=12), location="ruins"),
+        conversation=[{"role": "user", "content": "I enter the ruins"}],
+    )
+
+
+def test_checkpoint_roundtrips_state_and_conversation(tmp_path: Path) -> None:
+    """A checkpoint restores BOTH the game state and the conversation exactly."""
+    save_checkpoint(_slot(), data_dir=tmp_path)
+    loaded = load_checkpoint("battle", data_dir=tmp_path)
+    assert loaded is not None
+    assert loaded.state.player.gold == 12
+    assert loaded.state.location == "ruins"
+    assert loaded.conversation == [{"role": "user", "content": "I enter the ruins"}]
+
+
+def test_load_missing_checkpoint_returns_none(tmp_path: Path) -> None:
+    """Loading a checkpoint that was never saved returns None, not a crash."""
+    assert load_checkpoint("nope", data_dir=tmp_path) is None
+
+
+def test_checkpoint_name_is_sanitized_to_a_safe_file(tmp_path: Path) -> None:
+    """A name with path traversal is stripped to a safe filename (bounded write).
+
+    The dangerous name must not escape the saves directory, and must round-trip
+    under its sanitized form.
+    """
+    save_checkpoint(_slot(name="../../evil boss"), data_dir=tmp_path)
+    # Nothing was written outside the data dir.
+    assert not (tmp_path.parent / "evil boss.json").exists()
+    # It IS retrievable under the same (sanitized) name.
+    assert load_checkpoint("../../evil boss", data_dir=tmp_path) is not None
+
+
+def test_checkpoint_all_illegal_name_raises(tmp_path: Path) -> None:
+    """A name with no usable characters fails loudly rather than writing garbage."""
+    with pytest.raises(StateError):
+        save_checkpoint(_slot(name="../"), data_dir=tmp_path)
+
+
+def test_load_incompatible_checkpoint_returns_none(tmp_path: Path) -> None:
+    """A checkpoint file that doesn't match the SaveSlot schema loads as None."""
+    saves = tmp_path / "saves"
+    saves.mkdir(parents=True)
+    (saves / "broken.json").write_text('{"name": "broken"}', encoding="utf-8")  # no state
+    assert load_checkpoint("broken", data_dir=tmp_path) is None
+
+
+def test_list_checkpoints_returns_saved_names(tmp_path: Path) -> None:
+    """list_checkpoints reports saved slot names; empty when none exist."""
+    assert list_checkpoints(data_dir=tmp_path) == []
+    save_checkpoint(_slot(name="alpha"), data_dir=tmp_path)
+    save_checkpoint(_slot(name="beta"), data_dir=tmp_path)
+    assert list_checkpoints(data_dir=tmp_path) == ["alpha", "beta"]
