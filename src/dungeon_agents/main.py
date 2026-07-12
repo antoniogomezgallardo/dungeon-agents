@@ -333,7 +333,27 @@ def _review_scene(critic, runner, scene: str, debug: DebugState) -> str | None:
     return None
 
 
-def _play_turn(game_master, critic, runner, conversation, debug, tool_hooks):
+def _review_character(character_judge, runner, scene: str, debug: DebugState) -> str | None:
+    """Ask the Character Judge whether `scene` leaked the assistant's nature.
+
+    The output-side safety check (M7): returns None if the scene stays in
+    character, or a short reason if it broke character / leaked its prompt. Like
+    the Critic, its verdict is a structured token (IN_CHARACTER / LEAK) so code
+    decides. Returns None when no judge is configured (no API key at build time).
+    """
+    if character_judge is None:
+        return None
+    from dungeon_agents.agents.character_judge import CHARACTER_LEAK
+
+    verdict = runner.run_sync(character_judge, scene).final_output.strip().upper()
+    if debug.enabled:
+        console.print(f"[dim][debug] Character Judge verdict: {verdict}[/dim]")
+    if verdict.startswith(CHARACTER_LEAK):
+        return "the scene broke character or revealed the assistant's nature"
+    return None
+
+
+def _play_turn(game_master, critic, character_judge, runner, conversation, debug, tool_hooks):
     """Run ONE game turn: generate a scene, review it, show it, persist it.
 
     This is the model-driven part of a turn — the only place that calls the Game
@@ -370,21 +390,26 @@ def _play_turn(game_master, critic, runner, conversation, debug, tool_hooks):
             console.print("[dim][debug] input guardrail tripped: prompt injection blocked[/dim]")
         return None, conversation, None
     for _ in range(MAX_SCENE_RETRIES):
+        # Two independent reviews of the scene before the player sees it:
+        # the Critic checks COHERENCE with state, the Character Judge checks
+        # SAFETY (no break of character / prompt leak). Either firing triggers a
+        # regeneration, bounded by MAX_SCENE_RETRIES.
         problem = _review_scene(critic, runner, result.final_output, debug)
         if problem is None:
-            break  # scene is consistent — show it
+            problem = _review_character(character_judge, runner, result.final_output, debug)
+        if problem is None:
+            break  # scene is consistent and in character — show it
         if debug.enabled:
-            console.print(
-                f"[dim][debug] regenerating scene (Critic: {problem})[/dim]"
-            )
+            console.print(f"[dim][debug] regenerating scene ({problem})[/dim]")
         # Feed the problem back and regenerate from the same context.
         retry_input = result.to_input_list() + [
             {
                 "role": "user",
                 "content": (
-                    "A consistency check flagged your last scene: "
-                    f"{problem}. Rewrite the scene so it matches the tracked "
-                    "game state, keeping the same intent and choices."
+                    "A review flagged your last scene: "
+                    f"{problem}. Rewrite the scene so it fits, staying fully in "
+                    "character as the Game Master and keeping the same intent and "
+                    "choices."
                 ),
             }
         ]
@@ -511,10 +536,14 @@ def run() -> None:
     with console.status("[dim]Loading the game engine (first run can take a moment)…[/dim]"):
         from agents import Runner
 
+        from dungeon_agents.agents.character_judge import build_character_judge
         from dungeon_agents.agents.critic import build_critic
 
         game_master = build_game_master(settings)
         critic = build_critic(settings)
+        # Output-side safety reviewer (M7): flags a scene that broke character or
+        # leaked the assistant's nature, triggering a regeneration in _play_turn.
+        character_judge = build_character_judge(settings)
         debug = DebugState(enabled=settings.debug)
         tool_hooks = _build_tool_hooks(debug)
 
@@ -586,7 +615,7 @@ def run() -> None:
     # inventory, help, ...) are pure state reads that re-show the current scene
     # without spending a model call or re-running the Critic.
     _last_scene, conversation, outcome = _play_turn(
-        game_master, critic, Runner, conversation, debug, tool_hooks
+        game_master, critic, character_judge, Runner, conversation, debug, tool_hooks
     )
     if outcome is not None:
         _print_end_of_game(outcome)
@@ -627,7 +656,7 @@ def run() -> None:
             console.print("[dim]Starting a new adventure...[/dim]")
             conversation = [{"role": "user", "content": OPENING_PROMPT}]
             _last_scene, conversation, outcome = _play_turn(
-                game_master, critic, Runner, conversation, debug, tool_hooks
+                game_master, critic, character_judge, Runner, conversation, debug, tool_hooks
             )
             if outcome is not None:
                 _print_end_of_game(outcome)
@@ -703,7 +732,7 @@ def run() -> None:
         # This is the ONLY place a player action triggers scene generation.
         conversation.append({"role": "user", "content": player_input})
         scene, next_conversation, outcome = _play_turn(
-            game_master, critic, Runner, conversation, debug, tool_hooks
+            game_master, critic, character_judge, Runner, conversation, debug, tool_hooks
         )
         if scene is None:
             # Turn refused by a guardrail (e.g. prompt injection). Drop the blocked
