@@ -105,12 +105,12 @@ Variables adicionales (todas opcionales):
 
 Si `DUNGEON_PROVIDER` tiene un valor desconocido, la aplicacion lo ignora y
 usa el proveedor por defecto (`anthropic`) sin lanzar error
-(`config.py:80-81`).
+(`config.py`, `load_settings`).
 
 ### 2.3 Modelos por defecto
 
-- Anthropic: `claude-haiku-4-5` (`config.py:36`)
-- OpenAI: `gpt-4o-mini` (`config.py:37`)
+- Anthropic: `claude-haiku-4-5` (`config.py`, `DEFAULT_MODELS`)
+- OpenAI: `gpt-4o-mini` (`config.py`, `DEFAULT_MODELS`)
 
 ### 2.4 Modos de operacion
 
@@ -262,9 +262,9 @@ Tipo:
 - `settings.has_api_key` devuelve `False` (verificado en `test_smoke.py`).
 - El juego imprime `No ANTHROPIC_API_KEY found.` (o la variable del proveedor
   activo) junto con instrucciones para crear `.env`, y retorna sin colgarse
-  (`main.py:367-374`).
+  (`main.py`, `run`).
 
-**Referencia:** `src/dungeon_agents/config.py:61-63`, `src/dungeon_agents/main.py:367-374`
+**Referencia:** `src/dungeon_agents/config.py` (`Settings.has_api_key`), `src/dungeon_agents/main.py` (`run`)
 
 ---
 
@@ -282,7 +282,7 @@ Tipo:
 **Pasos:** `DUNGEON_PROVIDER=openai OPENAI_API_KEY=sk-test` + `load_settings()`.  
 **Resultado esperado:** `provider == "openai"`, `model == "gpt-4o-mini"`, `api_key == "sk-test"`.
 
-**Referencia:** `src/dungeon_agents/config.py:35-44`
+**Referencia:** `src/dungeon_agents/config.py` (`DEFAULT_MODELS`, `API_KEY_ENV`)
 
 ---
 
@@ -308,7 +308,7 @@ Tipo:
 **Pasos:** ejecutar `python -m pytest tests/test_smoke.py::test_debug_flag_reads_truthy_env`.  
 **Resultado esperado:** `DUNGEON_DEBUG=1` -> `debug is True`; `DUNGEON_DEBUG=off` -> `debug is False`.
 
-**Referencia:** `src/dungeon_agents/config.py:48`, constantes `_TRUTHY = {"1", "true", "yes", "on"}`.
+**Referencia:** `src/dungeon_agents/config.py` (`_TRUTHY = {"1", "true", "yes", "on"}`).
 
 ---
 
@@ -322,7 +322,7 @@ Tipo:
 
 **Resultado esperado:** El panel muestra `anthropic - claude-haiku-4-5  |  debug ON`
 (o el proveedor/modelo configurados). Si debug esta apagado, la parte `| debug ON`
-no aparece (`main.py:390-399`).
+no aparece (`main.py`, `run`, panel de bienvenida).
 
 ---
 
@@ -330,7 +330,7 @@ no aparece (`main.py:390-399`).
 
 **Objetivo:** verificar que el arranque no parece colgarse en el primer import del SDK.  
 **Pasos:** borrar la cache de Python (`.pyc`) y arrancar el juego con API key por primera vez.  
-**Resultado esperado:** aparece el mensaje de estado `Loading the game engine (first run can take a moment)` durante los ~20 s de carga inicial, antes del banner (`main.py:380`).
+**Resultado esperado:** aparece el mensaje de estado `Loading the game engine (first run can take a moment)` durante los ~20 s de carga inicial, antes del banner (`main.py`, `run`, spinner de carga).
 
 ---
 
@@ -360,7 +360,7 @@ establecido, aparece `not set yet` (comportamiento correcto, no un fallo).
 **Resultado inesperado (fallo):** los valores difieren del JSON, o el panel muestra
 valores que el GM invento sin llamar al tool.
 
-**Referencia:** `src/dungeon_agents/main.py:105-138`, `src/dungeon_agents/domain/state.py:91-109`
+**Referencia:** `src/dungeon_agents/main.py` (`_print_status`), `src/dungeon_agents/domain/state.py` (`load_state_or_none`)
 
 ---
 
@@ -369,7 +369,7 @@ valores que el GM invento sin llamar al tool.
 **Pasos:** escribir `status` en lugar de `stats`.  
 **Resultado esperado:** identico a DA-CMD-01.
 
-**Referencia:** `src/dungeon_agents/main.py:27` (`STATS_WORDS = {"stats", "status", "/stats"}`)
+**Referencia:** `src/dungeon_agents/main.py` (`STATS_WORDS = {"stats", "status", "/stats"}`)
 
 ---
 
@@ -381,7 +381,7 @@ valores que el GM invento sin llamar al tool.
 **Resultado esperado:** panel azul "Inventory" con los objetos y cantidades
 exactas del estado guardado. Sin panel "Stats" de HP/gold.
 
-**Referencia:** `src/dungeon_agents/main.py:138`, `src/dungeon_agents/domain/rules.py:34-43`
+**Referencia:** `src/dungeon_agents/main.py` (`_print_status`), `src/dungeon_agents/domain/rules.py` (`get_inventory`)
 
 ---
 
@@ -392,7 +392,7 @@ exactas del estado guardado. Sin panel "Stats" de HP/gold.
 del estado guardado. Si aun no hay resumen, muestra `Nothing notable has happened
 yet.` — nunca un texto inventado en tiempo real.
 
-**Referencia:** `src/dungeon_agents/main.py:140-153`
+**Referencia:** `src/dungeon_agents/main.py` (`_print_summary`)
 
 ---
 
@@ -405,7 +405,7 @@ recupera su contexto sin perder el lugar.
 2. Escribir `stats`, luego `inventory`, luego `summary`, luego `help`.
 
 **Resultado esperado:** despues de cada meta-comando se reimprime la ultima escena
-del GM. El jugador puede continuar jugando desde el mismo punto (`main.py:476-500`).
+del GM. El jugador puede continuar jugando desde el mismo punto (`main.py`, `run`, loop de meta-comandos).
 
 ---
 
@@ -414,7 +414,7 @@ del GM. El jugador puede continuar jugando desde el mismo punto (`main.py:476-50
 **Pasos:** escribir `help` (o `?`).  
 **Resultado esperado:** panel amarillo "Help" con los comandos `stats`, `inventory`,
 `summary`, `help`, `save <name>`, `load <name>`, `saves`, `new`, `debug`, `exit`
-listados con sus alias (`main.py:53-102`). No consume un turno de juego.
+listados con sus alias (`main.py`, `HELP_TEXT`). No consume un turno de juego.
 Tras mostrar la ayuda, se reimprime la ultima escena del GM.
 
 ---
@@ -430,7 +430,7 @@ Tras mostrar la ayuda, se reimprime la ultima escena del GM.
 
 **Resultado esperado:** el toggle funciona en caliente sin reiniciar el juego;
 los hooks existentes leen el estado mutable `DebugState` sin necesidad de
-reconstruir el agente (`main.py:310-319`, `main.py:504-510`).
+reconstruir el agente (`main.py`, `_build_tool_hooks` y `DebugState`).
 
 ---
 
@@ -446,7 +446,7 @@ spinner de carga ni errores. El estado guardado se conserva en disco.
 
 **Pasos:** pulsar Enter sin escribir nada.  
 **Resultado esperado:** la aplicacion vuelve al prompt de input sin enviar nada
-al GM y sin mostrar ninguna escena nueva (`main.py:511-512`).
+al GM y sin mostrar ninguna escena nueva (`main.py`, `run`, bloque entrada vacía).
 
 ---
 
@@ -458,7 +458,7 @@ al GM y sin mostrar ninguna escena nueva (`main.py:511-512`).
 **Pasos:** ejecutar `python -m pytest tests/test_state.py::test_save_state_then_load_state_roundtrips`.  
 **Resultado esperado:** los modelos Pydantic son iguales por valor.
 
-**Referencia:** `src/dungeon_agents/domain/state.py:51-65`
+**Referencia:** `src/dungeon_agents/domain/state.py` (`save_state`)
 
 ---
 
@@ -483,7 +483,7 @@ descarta silenciosamente y se trata como "sin guardado".
 **Pasos:** `python -m pytest tests/test_state.py::test_load_state_or_none_discards_incompatible_save`.  
 **Resultado esperado:** `load_state_or_none()` devuelve `None` sin `StateError`.
 
-**Referencia:** `src/dungeon_agents/domain/state.py:91-109`
+**Referencia:** `src/dungeon_agents/domain/state.py` (`load_state_or_none`)
 
 ---
 
@@ -508,9 +508,9 @@ escena exacta que el jugador vio — sin improvisar.
 - Panel cyan "Recap" con nombre/location/HP/gold/quest y `session_summary`.
 - A continuacion, la ultima escena del GM *verbatim* (texto identico al anotado).
 - El GM continua la aventura sin reiniciarla (porque recibe `RESUME_PROMPT`,
-  `main.py:34-35`).
+  `main.py`).
 
-**Referencia:** `src/dungeon_agents/main.py:288-302`, `main.py:409-417`
+**Referencia:** `src/dungeon_agents/main.py` (`_resume_banner`, `RESUME_PROMPT`, `run`, arranque con guardado)
 
 ---
 
@@ -528,7 +528,7 @@ el jugador confirma con `y`/`yes`.
 **Resultado esperado (al confirmar):**
 - Mensaje `Starting a new adventure...`
 - El panel Stats muestra el heroe `Adventurer` con HP 100/100, gold 0 e
-  inventario vacio (el estado inicial que genera `new_game_state()`, `game_tools.py:24-32`).
+  inventario vacio (el estado inicial que genera `new_game_state()`, `game_tools.py`).
 - El historial de conversacion se resetea; el GM introduce una nueva apertura.
 
 **Pasos (cancelacion):**
@@ -541,7 +541,7 @@ el jugador confirma con `y`/`yes`.
 - Se reimprime la ultima escena del GM.
 - El estado en disco no cambia; los valores de `stats` son los mismos que antes.
 
-**Referencia:** `src/dungeon_agents/main.py:576-595` (`_confirm` + bloque `new`)
+**Referencia:** `src/dungeon_agents/main.py` (`_confirm` + bloque `new`)
 
 ---
 
@@ -591,7 +591,7 @@ was found. Type continue to resume it, or new to start over.` y prompt
 **Resultado esperado:** no aparece menu; el juego arranca directamente con la
 escena de apertura del GM. No hay pregunta de continuar/nueva.
 
-**Referencia:** `src/dungeon_agents/main.py:501-543`
+**Referencia:** `src/dungeon_agents/main.py` (`run`, menú de arranque)
 
 ---
 
@@ -625,8 +625,7 @@ borrarla (`_resume_banner` mostrado, estado conservado).
 **Resultado esperado:** el juego arranca con partida nueva; el estado anterior
 ha sido descartado. Escribir `stats` muestra `Adventurer` con valores iniciales.
 
-**Referencia:** `src/dungeon_agents/main.py:529-543` (bloque `else` del arranque
-con confirmacion `_confirm`)
+**Referencia:** `src/dungeon_agents/main.py` (`run`, bloque `else` del arranque con confirmacion `_confirm`)
 
 ---
 
@@ -655,7 +654,7 @@ conversacion (memoria del modelo).
 panel "Saved checkpoints" que lista el nombre. Se reimprime la ultima escena
 despues del comando.
 
-**Referencia:** `src/dungeon_agents/domain/state.py:153-164`, `main.py:188-213`
+**Referencia:** `src/dungeon_agents/domain/state.py` (`save_checkpoint`), `main.py` (`_save_checkpoint`, `_list_checkpoints`)
 
 ---
 
@@ -679,7 +678,7 @@ un `RESUME_PROMPT` generico.
 lugar de los del checkpoint; o el GM improvisa un resumen en lugar de recordar
 el contexto exacto.
 
-**Referencia:** `src/dungeon_agents/main.py:638-658`
+**Referencia:** `src/dungeon_agents/main.py` (`run`, bloque `load`)
 
 ---
 
@@ -692,7 +691,7 @@ el contexto exacto.
 **Resultado esperado:** mensaje `No checkpoint named 'nombre-que-no-existe'
 (or it was incompatible).` El juego continua; el estado actual no cambia.
 
-**Referencia:** `src/dungeon_agents/domain/state.py:167-181`, `main.py:644-650`
+**Referencia:** `src/dungeon_agents/domain/state.py` (`load_checkpoint`), `main.py` (`run`, bloque `load`)
 
 ---
 
@@ -705,7 +704,7 @@ directorio de guardados.
 con el nombre saneado (`evil.json`); no se escribe ningun archivo fuera de ese
 directorio.
 
-**Referencia:** `src/dungeon_agents/domain/state.py:132-146` (`_safe_slot_filename`)
+**Referencia:** `src/dungeon_agents/domain/state.py` (`_safe_slot_filename`)
 
 ---
 
@@ -717,7 +716,7 @@ de forma ruidosa en lugar de escribir un fichero vacio o de nombre extrano.
 **Resultado esperado:** `StateError` con mensaje que explica que el nombre no es
 utilizable.
 
-**Referencia:** `src/dungeon_agents/domain/state.py:144-145`
+**Referencia:** `src/dungeon_agents/domain/state.py` (`_safe_slot_filename`)
 
 ---
 
@@ -729,7 +728,7 @@ encontrado" en lugar de crashear.
 **Pasos:** `python -m pytest tests/test_state.py::test_load_incompatible_checkpoint_returns_none`  
 **Resultado esperado:** `load_checkpoint("broken", ...)` devuelve `None`.
 
-**Referencia:** `src/dungeon_agents/domain/state.py:179-181`
+**Referencia:** `src/dungeon_agents/domain/state.py` (`load_checkpoint`)
 
 ---
 
@@ -739,7 +738,7 @@ encontrado" en lugar de crashear.
 **Resultado esperado:** mensaje `Usage: save <name> (e.g. save battle).` El
 juego no crashea; se reimprime la ultima escena.
 
-**Referencia:** `src/dungeon_agents/main.py:631-637`
+**Referencia:** `src/dungeon_agents/main.py` (`run`, bloque `save` sin nombre)
 
 ---
 
@@ -764,8 +763,7 @@ confirmacion de guardado, Recap). La escena del GM se reimprime (desde
 **Resultado inesperado (fallo):** cualquier linea `[debug] agent ...` o una
 escena que difiera de la ya mostrada antes del comando.
 
-**Referencia:** `src/dungeon_agents/main.py:621-658` (ramas save/load/saves en
-el loop; ningun bloque llama a `_play_turn`)
+**Referencia:** `src/dungeon_agents/main.py` (`run`, ramas save/load/saves en el loop; ningun bloque llama a `_play_turn`)
 
 ---
 
@@ -845,7 +843,7 @@ debe narrar esa restriccion).
 - Dano de 999 en HP=10 deja HP=0 y el mensaje incluye `"fallen"`.
 - Curacion de 999 en HP=95 deja HP=100 (MAX_HP).
 
-**Referencia:** `src/dungeon_agents/domain/rules.py:226-245` (`max(0, min(player.hp + delta, player.max_hp))`)
+**Referencia:** `src/dungeon_agents/domain/rules.py` (`change_hp`)
 
 ---
 
@@ -884,7 +882,7 @@ debe narrar esa restriccion).
 **Pasos:** `python -m pytest tests/test_dice.py::test_out_of_range_sides_are_rejected`.  
 **Resultado esperado:** `sides` en {1, 0, -5, 101, 1000} lanzan `InvalidDiceError`.
 
-**Referencia:** `src/dungeon_agents/domain/dice.py:19-23` (`MIN_SIDES=2, MAX_SIDES=100`)
+**Referencia:** `src/dungeon_agents/domain/dice.py` (`MIN_SIDES=2, MAX_SIDES=100`)
 
 ---
 
@@ -892,7 +890,7 @@ debe narrar esa restriccion).
 
 **Pasos:** `python -m pytest tests/test_dice.py::test_non_integer_sides_are_rejected`.  
 **Resultado esperado:** todos lanzan `InvalidDiceError` (incluido `True`, que es
-subclase de `int` pero se rechaza explicitamente, `dice.py:41-42`).
+subclase de `int` pero se rechaza explicitamente, `domain/dice.py`, `roll_dice`).
 
 ---
 
@@ -901,7 +899,7 @@ subclase de `int` pero se rechaza explicitamente, `dice.py:41-42`).
 **Pasos:** `python -m pytest tests/test_dice.py::test_check_succeeds_when_roll_meets_threshold tests/test_dice.py::test_check_fails_when_roll_below_threshold tests/test_dice.py::test_check_success_is_meet_or_exceed`.  
 **Resultado esperado:** exito cuando roll >= threshold (>=, no >); fallo cuando roll < threshold.
 
-**Referencia:** `src/dungeon_agents/domain/dice.py:67-73` (umbrales: trivial=3, easy=5, moderate=10, hard=15, very_hard=18)
+**Referencia:** `src/dungeon_agents/domain/dice.py` (`DIFFICULTY_THRESHOLDS`: trivial=3, easy=5, moderate=10, hard=15, very_hard=18)
 
 ---
 
@@ -937,7 +935,7 @@ El narrador describe el resultado que el tool devolvio, no uno inventado.
 #### DA-DAD-09 — El tool `skill_check` expuesto al Referee devuelve formato legible [AUTO indirecto]
 
 **Objetivo:** verificar el formato de respuesta del tool wrapper.  
-**Pasos (indirectos):** leer `src/dungeon_agents/tools/game_tools.py:219-241` y
+**Pasos (indirectos):** leer `src/dungeon_agents/tools/game_tools.py` (`skill_check`) y
 ejecutar `python -m pytest tests/test_dice.py` para confirmar que la logica
 subyacente es correcta.  
 **Resultado esperado:** la cadena devuelta tiene el formato
@@ -976,14 +974,14 @@ subyacente es correcta.
 **Resultado esperado:** `CRITIC_OK` y `CRITIC_PROBLEM_PREFIX` aparecen en
 `CRITIC_INSTRUCTIONS`; el loop (`main.py`) parsea estas cadenas, no un modelo.
 
-**Referencia:** `src/dungeon_agents/agents/critic.py:35-36`
+**Referencia:** `src/dungeon_agents/agents/critic.py` (`CRITIC_OK`, `CRITIC_PROBLEM_PREFIX`)
 
 ---
 
 #### DA-MAG-05 — El tope de reintentos del Critic es un entero >= 0 [AUTO]
 
 **Pasos:** `python -m pytest tests/test_critic.py::test_retry_cap_is_bounded`.  
-**Resultado esperado:** `MAX_SCENE_RETRIES` es un entero (`main.py:43`, actualmente `1`).
+**Resultado esperado:** `MAX_SCENE_RETRIES` es un entero (`main.py`, `MAX_SCENE_RETRIES`, actualmente `1`).
 
 ---
 
@@ -998,7 +996,7 @@ subyacente es correcta.
 **Resultado esperado:** aparece `[debug] Critic verdict: OK` (o un mensaje de
 regeneracion si el Critic encontro una contradiccion). El Critic siempre actua;
 su ejecucion es parte del codigo del loop, no dependiente del modelo
-(`main.py:424-447`).
+(`main.py`, `_play_turn`).
 
 ---
 
@@ -1020,7 +1018,7 @@ seguido de `[debug] regenerating scene (Critic: ...)`, y una nueva escena cohere
 con el estado real. Si el Critic da OK, la escena se muestra sin regenerar.
 
 **Resultado esperado (si MAX_SCENE_RETRIES se alcanza):** la escena se muestra
-de todas formas (el tope anti-bucle actua; `main.py:425-444`).
+de todas formas (el tope anti-bucle actua; `main.py`, `_play_turn`).
 
 ---
 
@@ -1077,7 +1075,7 @@ guardan y sobreviven a un reinicio.
 **Objetivo:** si el heroe tiene HP=0 Y la quest esta completada, el resultado
 es "lost", no "won".  
 **Pasos:** `python -m pytest tests/test_end_of_game.py::test_defeat_takes_precedence_over_victory`.  
-**Resultado esperado:** `"lost"` (el codigo evalua `is_game_over` primero; `main.py:205-208`).
+**Resultado esperado:** `"lost"` (el codigo evalua `is_game_over` primero; `main.py`, `_check_end_of_game`).
 
 ---
 
@@ -1100,7 +1098,7 @@ el Lore Keeper haya establecido una quest.
 2. Verificar en `data/game_state.json` que `active_quest.completed` es `true`.
 
 **Resultado esperado:**
-- Panel verde con titulo "The End" y texto de victoria (`main.py:212-218`).
+- Panel verde con titulo "The End" y texto de victoria (`main.py`, `_print_end_of_game`).
 - Mensaje `Type new next time to begin a fresh adventure.`
 - El loop termina; el juego no sigue pidiendo input.
 
@@ -1115,7 +1113,7 @@ el Lore Keeper haya establecido una quest.
 3. Verificar en `data/game_state.json` que `player.hp` es `0`.
 
 **Resultado esperado:**
-- Panel rojo con titulo "Game Over" y texto de derrota (`main.py:219-224`).
+- Panel rojo con titulo "Game Over" y texto de derrota (`main.py`, `_print_end_of_game`).
 - Mensaje `Type new next time to begin a fresh adventure.`
 - El loop termina.
 
@@ -1156,7 +1154,7 @@ exclusivamente en el `GameState`, sin consultar al modelo.
 
 **Pasos:** pulsar Ctrl+C en el prompt de input del jugador.  
 **Resultado esperado:** mensaje `Farewell, adventurer.` y salida limpia sin
-traceback. El estado guardado en disco no se corrompe (`main.py:465-467`,
+traceback. El estado guardado en disco no se corrompe (`main.py`, `run`,
 captura `KeyboardInterrupt`).
 
 ---
@@ -1171,10 +1169,10 @@ captura `KeyboardInterrupt`).
 #### DA-ROB-06 — Dificultad invalida en `skill_check` devuelve mensaje de error, no crash [MANUAL/INDIRECTO]
 
 **Objetivo:** si el modelo pasa una dificultad desconocida, el tool wrapper
-(`game_tools.py:219-241`) captura `InvalidDifficultyError` y devuelve un string
+(`game_tools.py`, `skill_check`) captura `InvalidDifficultyError` y devuelve un string
 de error al modelo en lugar de propagar la excepcion.  
 **Pasos:**
-- Lectura del codigo: `game_tools.py:232-234` captura la excepcion y devuelve
+- Lectura del codigo: `game_tools.py` (`skill_check`) captura la excepcion y devuelve
   `f"Invalid difficulty: {exc}"`.
 - No es necesario test adicional; la logica de la excepcion esta cubierta por `test_dice.py`.
 
@@ -1186,20 +1184,20 @@ puede adaptar su respuesta; el juego no se detiene.
 #### DA-ROB-07 — Dados fuera de rango devuelven mensaje de error, no crash [MANUAL/INDIRECTO]
 
 **Objetivo:** igual que DA-ROB-06 pero para `roll_dice`.  
-**Referencia:** `game_tools.py:69-73` captura `InvalidDiceError`.
+**Referencia:** `game_tools.py` (`roll_dice`) captura `InvalidDiceError`.
 
 ---
 
 #### DA-ROB-08 — `set_location` con nombre vacio devuelve mensaje de error [AUTO indirecto]
 
-**Pasos:** leer `game_tools.py:275-276`: `if not location: return "A location needs a name."`.  
+**Pasos:** leer `game_tools.py` (`set_location`): `if not location: return "A location needs a name."`.  
 **Resultado esperado:** el tool no muta el estado; el modelo recibe una razon y puede solicitar un nombre valido.
 
 ---
 
 #### DA-ROB-09 — `set_quest` con titulo vacio devuelve mensaje de error [AUTO indirecto]
 
-**Referencia:** `game_tools.py:294-295`: `if not title: return "A quest needs a title."`.
+**Referencia:** `game_tools.py` (`set_quest`): `if not title: return "A quest needs a title."`.
 
 ---
 
@@ -1217,13 +1215,13 @@ dentro de un hook aborta la llamada al tool.
 **Resultado esperado:** ninguna salida del propio codigo de la aplicacion (paneles,
 mensajes de debug, mensajes de meta-comandos) provoca `UnicodeEncodeError`. El
 texto del modelo puede contener caracteres no-ASCII; lo que importa es que el
-codigo de la aplicacion no los inyecta (`main.py:339-342`).
+codigo de la aplicacion no los inyecta (`main.py`, `_build_tool_hooks`).
 
 ---
 
 #### DA-WIN-02 — El fichero de estado se escribe y lee como UTF-8 [AUTO indirecto]
 
-**Referencia:** `state.py:64` usa `encoding="utf-8"` en la escritura y `state.py:83`
+**Referencia:** `domain/state.py` (`save_state`) usa `encoding="utf-8"` en la escritura y `domain/state.py` (`load_state`)
 en la lectura. Los modelos Pydantic pueden contener unicode si el modelo lo
 genera; la capa de persistencia no lo corrompe.
 
