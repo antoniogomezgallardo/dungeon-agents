@@ -23,14 +23,16 @@ Your job each turn:
 - ALWAYS end your reply by offering the player 2 or 3 concrete actions they can
   take next. Present them as a short numbered list.
 
-Keep the tracked game state in sync with your story. The player can open a stats
-screen that reads this tracked state, so it should match your narration.
-- On the first scene of a new game, call `set_location` (the place you describe)
-  and `set_quest` (the opening objective) so stats reflect the story.
-- When the player travels to a new place, call `set_location` again; when they
-  take on a new objective, call `set_quest` again.
-- Prefer keeping these in sync as you go. (If a value hasn't been set yet, the
-  player's stats simply show "not set yet" — an honest gap, never a wrong value.)
+Keep the tracked world state in sync with your story. The player can open a stats
+screen that reads this tracked state, so it should match your narration. You do
+NOT update it yourself — the Lore Keeper does:
+- Consult the `lore_keeper` tool whenever the world changes: on the opening scene
+  of a new game (to set the starting place and quest), when the player travels
+  somewhere new, when they take on or complete an objective, or after a
+  story-significant beat worth recording. Give it the current scene or development
+  and it updates the tracked location, quest, and running summary to match.
+- (If a value hasn't been set yet, the player's stats simply show "not set yet" —
+  an honest gap, never a wrong value.)
 
 Rules:
 - To resolve the OUTCOME of an action that is risky or depends on chance (an
@@ -50,10 +52,6 @@ Rules:
   in-character way rather than ignoring it.
 - You may use `save_game` to persist progress and `load_game` to resume a saved
   adventure.
-- After a story-significant moment (accepting or completing a quest, reaching a
-  new place, meeting a key character, a major win or loss), call `update_summary`
-  with a brief factual recap of what has happened so far, so the player can
-  review it or resume later with proper context.
 - Never break character or mention that you are an AI or that you are using tools.
 - Keep the player in the driver's seat: end on their choices, not on a
   resolved conclusion.
@@ -82,30 +80,31 @@ def _resolve_model(settings: Settings):
 def build_game_master(settings: Settings):
     """Construct the Game Master agent from the OpenAI Agents SDK.
 
-    From M6 the Game Master is an *orchestrator*: it narrates and, to resolve
-    contested outcomes, it consults the Rules Referee — which is wired in below as
-    a tool (the agent-as-tool coordination pattern). Imported lazily so that
-    importing this module (e.g. in the smoke test) does not require the SDK to be
-    installed or an API key to be present.
+    From M6 the Game Master is an *orchestrator*: it narrates and delegates to
+    two specialists, each wired in below as a tool (the agent-as-tool coordination
+    pattern) — the Rules Referee for contested outcomes (dice, gold, HP) and the
+    Lore Keeper for world coherence (location, quest, summary). Imported lazily so
+    that importing this module (e.g. in the smoke test) does not require the SDK to
+    be installed or an API key to be present.
     """
     from agents import Agent, set_tracing_disabled
 
     # Built here (not module top) to keep the SDK out of the import path for
-    # API-key-free tests. Deferred import to avoid a circular import: rules_referee
-    # imports _resolve_model from this module.
+    # API-key-free tests. Deferred imports to avoid a circular import: both
+    # specialists import _resolve_model from this module.
+    from dungeon_agents.agents.lore_keeper import build_lore_keeper
     from dungeon_agents.agents.rules_referee import build_rules_referee
 
     # Imported here (not at module top) to keep the SDK out of the import path
     # for API-key-free tests. The tools themselves wrap pure domain functions.
+    # Note: set_location / set_quest / update_summary are NOT here anymore — they
+    # moved to the Lore Keeper, which now owns narrative-state sync.
     from dungeon_agents.tools.game_tools import (
         add_item,
         get_inventory,
         load_game,
         remove_item,
         save_game,
-        set_location,
-        set_quest,
-        update_summary,
     )
 
     # The SDK's tracing exports run traces to OpenAI's platform and require an
@@ -133,19 +132,30 @@ def build_game_master(settings: Settings):
         ),
     )
 
+    # The Lore Keeper is wired in the same way — a second specialist exposed as a
+    # tool. The Game Master consults it to keep the tracked world (location, quest,
+    # summary) in sync with the story; control returns to the GM afterwards.
+    lore_keeper = build_lore_keeper(settings)
+    lore_keeper_tool = lore_keeper.as_tool(
+        tool_name="lore_keeper",
+        tool_description=(
+            "Consult the Lore Keeper to keep the tracked world in sync with the "
+            "story. Give it the current scene or development; it updates the "
+            "location, quest, and running summary to match."
+        ),
+    )
+
     return Agent(
         name="Game Master",
         instructions=GAME_MASTER_INSTRUCTIONS,
         model=_resolve_model(settings),
         tools=[
             rules_referee_tool,  # <-- the Rules Referee agent, exposed as a tool
+            lore_keeper_tool,    # <-- the Lore Keeper agent, exposed as a tool
             save_game,
             load_game,
             get_inventory,
             add_item,
             remove_item,
-            update_summary,
-            set_location,
-            set_quest,
         ],
     )
