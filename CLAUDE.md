@@ -215,6 +215,39 @@ pip install -e ".[dev]"
   Point-in-time restore requires both. `SaveSlot` captures both; restoring only
   the `GameState` would give the model its old facts but no memory of how it got
   there. This is the strongest transfer to TestOps AI in the project so far.
-- M7 — Guardrails & safety constraints: not started.
+- **M7 — Guardrails & safety constraints: DONE.** Defense in depth across three
+  blocks.
+  (A) Deterministic input guardrail — `detect_injection` in `domain/guardrails.py`
+  (pure Python, zero SDK): 13 named patterns targeting instruction-manipulation
+  shapes (`_INJECTION_PATTERNS`). `InjectionResult` with `detected` bool and
+  `label` string. Wired into the Game Master via `build_injection_guardrail`
+  (`agents/guardrails.py`) as an SDK `@input_guardrail`. Blocked messages are
+  discarded from the conversation history so they cannot poison future turns.
+  (B) LLM-based input guardrail (Block 2) — `INJECTION_JUDGE_INSTRUCTIONS` +
+  `JUDGE_SAFE` / `JUDGE_INJECTION` constants in `agents/injection_judge.py`
+  (module-level, testable without API key). `build_injection_judge(settings)`
+  builds a no-tool specialist agent. `build_injection_guardrail` now runs two
+  layers: patterns first (instant, free); if not blocked, the Injection Judge
+  evaluates the message (one model call). Either layer trips the wire.
+  `output_info` carries `blocked_by: pattern:<label>` or `blocked_by: llm`.
+  DESIGN DECISION: always run the LLM judge on layer-1 survivors (maximum
+  coverage, one model call per surviving turn).
+  (C) LLM-based output guardrail (Block 3) — `CHARACTER_JUDGE_INSTRUCTIONS` +
+  `CHARACTER_OK` (`"IN_CHARACTER"`) / `CHARACTER_LEAK` (`"LEAK"`) in
+  `agents/character_judge.py`. `_review_character` helper in `main.py` reads the
+  verdict and returns `None` (ok) or a reason string (leak). Integrated into the
+  `_play_turn` review pipeline alongside the Critic: either the Critic (coherence)
+  or the Character Judge (safety) fires a bounded regeneration. DESIGN DECISION:
+  integrated in pipeline rather than SDK `@output_guardrail` to reuse the Critic's
+  self-repair loop and avoid fighting `OutputGuardrailTripwireTriggered`.
+  Full pipeline: input pattern check -> Injection Judge -> Game Master -> Critic +
+  Character Judge -> player.
+  First `@pytest.mark.llm` tests: 5 (Injection Judge) + 6 (Character Judge) = 11
+  LLM tests using weak oracle (`startswith(verdict_token)`); skip automatically
+  without API key. 160 deterministic tests + 11 LLM tests (171 total).
+  KEY LESSON: input guardrails PREVENT (block before the model sees the message);
+  output guardrails DETECT (catch what slipped through, last line of defense).
+  The Critic checks coherence; the Character Judge checks security: two
+  independent axes of output review.
 - M8 — Evaluation & tests: not started.
 - M9 — Bridge to QA/TestOps AI (`docs/qa_migration_notes.md`): not started.

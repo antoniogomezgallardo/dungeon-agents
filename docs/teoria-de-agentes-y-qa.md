@@ -452,6 +452,17 @@ Por eso el consenso de 2026 insiste en *auditar los guardrails* y *stress-testea
 los agentes con entradas adversas: precisamente para cazar los modos en que un
 agente falla de forma plausible pero silenciosa.
 
+**Guardrails — la distinción prevención/detección, ya demostrada en el proyecto
+(M7).** Un guardrail de *entrada* previene: el mensaje nunca llega al modelo, el
+modelo nunca genera respuesta, el turno se descarta limpiamente. Un guardrail de
+*salida* detecta: el modelo ya corrió; el guardrail verifica si lo que produjo es
+aceptable antes de entregarlo al usuario. En Dungeon Agents, el Injection Judge
+(entrada) y el Character Judge (salida) son los dos ejes de esta defensa. El mismo
+patrón aplica a QA: un agente de QA puede recibir inputs adversos diseñados para
+que produzca veredictos falsos (ataque de entrada), y puede *drift* espontáneo
+hacia veredictos fuera de su criterio definido (fallo de salida). Los guardrails
+de entrada/salida son controles de calidad del agente, no solo de seguridad.
+
 > **Idea para grabar #8 (la más importante):** diseña siempre para que el fallo
 > del modelo sea *ruidoso y honesto*, no *silencioso y plausible*. En QA, un hueco
 > visible es aceptable; un falso positivo silencioso es inaceptable.

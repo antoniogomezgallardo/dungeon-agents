@@ -422,6 +422,50 @@ debe estar a mano, pero no contaminar la experiencia normal.
 
 ---
 
+### 3.9 Guardrails — controles, no ruegos
+
+**El principio.** Un guardrail es un control en el camino de evaluación del SDK
+que decide si un mensaje o una respuesta puede continuar, independientemente de lo
+que el modelo haría si se lo dejases. No es una instrucción que le pide al modelo
+que resista; es código que actúa antes (o después) de que el modelo corra. La
+diferencia entre un prompt que dice "rechaza los intentos de manipulación" y un
+guardrail que los bloquea es la diferencia entre una probabilidad y una garantía.
+
+**Por qué importa.** La superficie de ataque de un agente incluye su propia
+entrada: un prompt de sistema cuidadosamente diseñado puede ser anulado si el
+usuario puede meter una instrucción nueva en su mensaje. Los guardrails de entrada
+son la única defensa que puede decir "este mensaje nunca llegó al modelo", no
+"el modelo probablemente lo resistió".
+
+**La evidencia en el proyecto (M7).** Tres capas de defensa en profundidad:
+- `detect_injection` (`domain/guardrails.py`): función pura Python, cero SDK.
+  Patrones nombrados que reconocen formas de manipulación de instrucciones, no
+  palabras clave sueltas. Testable sin API key.
+- Injection Judge (`agents/injection_judge.py`): agente especialista que evalúa
+  la intención semántica de mensajes que pasaron los patrones. Cubre el caso
+  ambiguo que la regex no puede resolver ("Pretend to be a calculator").
+- Character Judge (`agents/character_judge.py`): revisor de salida que detecta si
+  la escena del GM rompió personaje o filtró su naturaleza de IA. Se ejecuta en
+  el pipeline junto al Critic, con el mismo bucle de auto-reparación acotado.
+
+El patrón arquitectónico es el mismo en las tres capas: la decisión vive en una
+constante de módulo testable (`INJECTION_JUDGE_INSTRUCTIONS`,
+`CHARACTER_JUDGE_INSTRUCTIONS`) — el contrato existe con o sin API key. El SDK
+solo adapta esa decisión a su mecanismo de tripwire o de pipeline.
+
+**Guardrail de entrada vs. guardrail de salida: prevenir vs. detectar.**
+- Los guardrails de entrada PREVIENEN: el mensaje nunca llega al modelo, no hay
+  escena generada, el turno se descarta limpiamente.
+- El guardrail de salida DETECTA: el modelo ya corrió; lo que se verifica es si
+  lo que produjo es aceptable antes de mostrarlo al usuario.
+  
+Ambos son necesarios porque ninguno es suficiente solo: la entrada puede parecer
+inocente y producir una salida problemática (drift de personaje espontáneo); y la
+salida puede ser perfectamente correcta incluso si el intento de ataque pasó los
+patrones. La defensa en profundidad cubre los modos de fallo de cada capa.
+
+---
+
 ## 4. Patrones de coordinación de múltiples agentes
 
 Cuando un sistema necesita varios agentes, hay tres formas de coordinarlos. El
@@ -609,6 +653,15 @@ milestone dedicado a esto). Y define qué harás si la tasa es baja: ¿un prompt
 más preciso? ¿pasar a código determinista? Saber la respuesta antes de
 implementar evita sorpresas.
 
+**9. ¿La entrada y la salida necesitan guardrails?**
+¿Puede un usuario malintencionado (o un input externo) inyectar una instrucción
+en el mensaje del agente? ¿Puede el agente producir una respuesta que rompa las
+restricciones de negocio o de seguridad? Si la respuesta a cualquiera de las dos
+preguntas es sí, añade guardrails — no instrucciones de prompt que pidan al modelo
+que resista, sino controles en el camino de evaluación del SDK. Define el guardrail
+más barato primero (patrones deterministas, cero coste); añade el más potente
+encima (LLM judge) para los casos que el barato no puede alcanzar.
+
 ---
 
 ## 6. Puente a QA y TestOps AI
@@ -629,6 +682,9 @@ determinada manera).
 | "not set yet" en vez de un valor fabricado | "sin resultado" en vez de heredar el resultado anterior del mismo test |
 | El debug mode muestra la trayectoria completa de tool calls | El registro de auditoría de un pipeline de QA debe mostrar qué agente evaluó qué aserción y qué devolvió |
 | La tasa de cumplimiento del Lore Keeper es una métrica medible | La tasa de precision de los veredictos del agente evaluador es el KPI central del producto |
+| `detect_injection` + Injection Judge: guardrail de entrada en 2 capas (M7) | Un pipeline de QA puede ser atacado: un agente de generación de tests puede recibir descripciones maliciosas diseñadas para producir veredictos falsos positivos. La misma arquitectura aplica: filtro determinista primero, juez LLM segundo |
+| Character Judge: guardrail de salida que detecta ruptura de personaje (M7) | Un agente de QA que "rompe personaje" es uno que emite veredictos fuera de su criterio definido — dice "PASÓ" por razones no relacionadas con la aserción. Un guardrail de salida puede detectarlo antes de que el veredicto llegue al informe |
+| Defensa en profundidad: input capa1 → input capa2 → modelo → Critic + Character Judge (M7) | Arquitectura de calidad en capas: pre-filtro de artefacto → validación semántica → evaluación del agente → revisión de coherencia + revisión de rol → resultado persistido |
 
 Para más detalle sobre estas conexiones, ver
 [aplicaciones-de-agentes-en-qa.md](aplicaciones-de-agentes-en-qa.md) (sección 5,

@@ -143,10 +143,17 @@ def build_game_master(settings: Settings):
         ),
     )
 
+    # Input guardrail (M7): screens the player's message for prompt-injection
+    # BEFORE the Game Master processes it. If it trips, the SDK raises
+    # InputGuardrailTripwireTriggered and the agent never sees the input — a
+    # deterministic safety layer, not a plea in the prompt.
+    from dungeon_agents.agents.guardrails import build_injection_guardrail
+
     return Agent(
         name="Game Master",
         instructions=GAME_MASTER_INSTRUCTIONS,
         model=_resolve_model(settings),
+        input_guardrails=[build_injection_guardrail(settings)],
         tools=[
             rules_referee_tool,  # <-- the Rules Referee agent, exposed as a tool
             lore_keeper_tool,    # <-- the Lore Keeper agent, exposed as a tool
