@@ -37,16 +37,25 @@ Your single job each time you are consulted:
   OUTCOME is. Answer concisely and factually — a ruling, not a story.
 
 How to rule:
-- When the outcome depends on chance (a risky attack, a tricky climb, a skill
-  check), call the `roll_dice` tool and base your ruling on the number it returns.
-  Never invent a dice number yourself.
+- When an action's success is UNCERTAIN (a risky attack, a tricky climb, picking
+  a lock, persuading a guard), call `skill_check`. YOU judge how hard it is and
+  pass a difficulty ("trivial", "easy", "moderate", "hard", "very_hard"); the code
+  rolls and decides success or failure. Base your ruling on what it returns — you
+  cannot overrule it. (Use the low-level `roll_dice` only for pure flavor with no
+  success/failure at stake, e.g. how loud a noise is.)
 - When an action would spend gold or consume items, call `check_can_afford`
   first (pass the gold cost and/or the item and quantity you read from the
   action). The code decides whether it is affordable. If it reports it cannot be
   afforded, rule it DISALLOWED and relay the one-line reason.
-- State the result plainly: whether it succeeds or fails, any dice rolled and
-  their values, and a one-line reason. Example: "ALLOWED. Rolled 14 on 1d20 vs a
-  moderate climb (needs 10+): success." or "DISALLOWED: the player has 3 gold,
+- Once an action's outcome is decided, PERSIST its consequences by calling the
+  matching tool so the tracked state stays accurate:
+  - `earn_gold` / `spend_gold` when the player gains or loses gold.
+  - `change_hp` when the player takes damage (negative) or heals (positive).
+  These write the change to the game state; without them the change exists only in
+  the story and is lost on reload. Only persist consequences you actually ruled.
+- State the result plainly: whether it succeeds or fails, any check rolled and its
+  values, and a one-line reason. Example: "ALLOWED. skill_check moderate: rolled
+  14 vs 10+, success; 6 damage dealt." or "DISALLOWED: the player has 3 gold,
   cannot spend 5."
 
 Hard limits:
@@ -62,18 +71,35 @@ Hard limits:
 def build_rules_referee(settings: Settings):
     """Construct the Rules Referee agent from the OpenAI Agents SDK.
 
-    Given only the arbitration tools (dice + action validation) — deliberately NOT
-    the narration/state-mutation tools — so its capability surface matches its
-    narrow job. Imported lazily so importing this module never requires the SDK or
-    an API key (keeps the instructions constant test-safe).
+    Given only the ARBITRATION tools — resolving uncertain outcomes (skill_check,
+    roll_dice), checking affordability (check_can_afford), and persisting the
+    resource consequences it rules on (earn_gold, spend_gold, change_hp).
+    Deliberately NOT the narration or story-state tools (set_location, add_item,
+    update_summary...) — those belong to the Game Master. Its tool surface matches
+    its narrow job. Imported lazily so importing this module never requires the SDK
+    or an API key (keeps the instructions constant test-safe).
     """
     from agents import Agent
 
-    from dungeon_agents.tools.game_tools import check_can_afford, roll_dice
+    from dungeon_agents.tools.game_tools import (
+        change_hp,
+        check_can_afford,
+        earn_gold,
+        roll_dice,
+        skill_check,
+        spend_gold,
+    )
 
     return Agent(
         name="Rules Referee",
         instructions=RULES_REFEREE_INSTRUCTIONS,
         model=_resolve_model(settings),
-        tools=[roll_dice, check_can_afford],
+        tools=[
+            skill_check,
+            roll_dice,
+            check_can_afford,
+            earn_gold,
+            spend_gold,
+            change_hp,
+        ],
     )

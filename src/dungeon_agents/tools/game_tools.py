@@ -174,6 +174,74 @@ def check_can_afford(
 
 
 @function_tool
+def earn_gold(amount: int) -> str:
+    """Give the player gold (a reward, loot, payment) and PERSIST it.
+
+    Call this whenever the story says the player gains gold, so the tracked state
+    (which stats and purchases read) actually reflects it. Without this call the
+    gold exists only in the narration and is lost on reload.
+
+    Args:
+        amount: How much gold to add (must be positive).
+    """
+    return _apply(rules.earn_gold(_load_or_new_state(), amount))
+
+
+@function_tool
+def spend_gold(amount: int) -> str:
+    """Deduct gold the player spends (a purchase, a bribe, a toll) and PERSIST it.
+
+    The rule refuses to overspend: a player cannot go below 0 gold. Prefer calling
+    `check_can_afford` first to tell the player *before* committing; this tool
+    performs the actual deduction once the spend is allowed.
+
+    Args:
+        amount: How much gold to deduct (must be positive).
+    """
+    return _apply(rules.spend_gold(_load_or_new_state(), amount))
+
+
+@function_tool
+def change_hp(delta: int) -> str:
+    """Apply a health change (damage as a negative delta, healing as positive).
+
+    HP is clamped to the valid range by the rules (never below 0, never above the
+    player's maximum), and the change is PERSISTED. Call this when the story deals
+    damage or heals the player, so stats and the lose condition stay accurate.
+
+    Args:
+        delta: HP change; negative for damage, positive for healing.
+    """
+    return _apply(rules.change_hp(_load_or_new_state(), delta))
+
+
+@function_tool
+def skill_check(difficulty: str = "moderate") -> str:
+    """Resolve a risky action by rolling 1d20 against a named difficulty.
+
+    Use this instead of a bare dice roll whenever an action's success is
+    uncertain (an attack, a climb, picking a lock, persuading a guard). YOU judge
+    how hard it is and pass a difficulty; the CODE rolls and decides success or
+    failure — you cannot overrule the result, only narrate it.
+
+    Difficulty levels: "trivial", "easy", "moderate", "hard", "very_hard".
+    Returns the roll, the threshold, and whether it SUCCEEDED or FAILED.
+
+    Args:
+        difficulty: How hard the action is. Defaults to "moderate".
+    """
+    try:
+        result = dice.resolve_check(difficulty)
+    except dice.InvalidDifficultyError as exc:
+        return f"Invalid difficulty: {exc}"
+    verdict = "SUCCESS" if result.success else "FAILURE"
+    return (
+        f"{verdict}: rolled {result.roll} on 1d20 vs {result.difficulty} "
+        f"(needs {result.threshold}+)."
+    )
+
+
+@function_tool
 def update_summary(summary: str) -> str:
     """Record a concise running summary of the adventure so far.
 

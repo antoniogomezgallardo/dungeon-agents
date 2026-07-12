@@ -27,11 +27,20 @@ def test_referee_is_an_arbiter_not_a_narrator() -> None:
     assert "not narrate" in text or "do not narrate" in text
 
 
-def test_referee_uses_dice_for_chance() -> None:
-    """Chance outcomes come from the dice tool, never invented numbers."""
+def test_referee_uses_skill_check_for_uncertain_outcomes() -> None:
+    """Uncertain outcomes are decided by skill_check (roll vs difficulty in code)."""
     text = RULES_REFEREE_INSTRUCTIONS.lower()
-    assert "roll_dice" in text
-    assert "never invent a dice number" in text
+    assert "skill_check" in text
+    assert "cannot overrule" in text
+
+
+def test_referee_persists_resource_consequences() -> None:
+    """The Referee is told to persist gold/HP changes it rules on."""
+    text = RULES_REFEREE_INSTRUCTIONS.lower()
+    assert "earn_gold" in text and "spend_gold" in text
+    assert "change_hp" in text
+    # And the reason why: without persisting, changes are lost on reload.
+    assert "lost on reload" in text
 
 
 def test_referee_validates_resource_actions() -> None:
