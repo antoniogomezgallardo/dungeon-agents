@@ -1,8 +1,9 @@
 # Milestone 6 — Multi-Agent Architecture
 
 > **Status:** Done — all four agents built (Game Master + Rules Referee + Lore
-> Keeper + Critic), persistence fixed, skill-check mechanic, and review pipeline.
-> 114 deterministic tests passing without an API key.
+> Keeper + Critic), persistence fixed, skill-check mechanic, review pipeline, and
+> end-of-game detection wired.
+> 119 deterministic tests passing without an API key.
 >
 > **Theme:** Specialization + coordination produce reliability that a single
 > agent with a longer prompt never can. The model orchestrates; the code verifies.
@@ -1103,9 +1104,9 @@ four-agent system.
 ```bash
 # Inside an activated .venv with `pip install -e ".[dev]"` already run:
 
-# Full deterministic suite (114 tests, no API key):
+# Full deterministic suite (119 tests, no API key):
 python -m pytest -m "not llm" -q
-# Expected: 114 passed
+# Expected: 119 passed
 
 # Contract tests for the Rules Referee (7 tests, includes Block 2 persistence checks):
 python -m pytest tests/test_rules_referee.py -v
@@ -1136,6 +1137,7 @@ python -m pytest tests/test_rules.py         -q    # 38 tests (29 original + 9 c
 python -m pytest tests/test_rules_referee.py -q    # 7 tests
 python -m pytest tests/test_lore_keeper.py   -q    # 5 tests
 python -m pytest tests/test_critic.py        -q    # 6 tests
+python -m pytest tests/test_end_of_game.py   -q    # 5 tests (M6 carryover: win/lose wired)
 ```
 
 **Verify the contract directly (no API key):**
@@ -1447,40 +1449,38 @@ session, query the database, and verify the result is there.
 
 ---
 
-## 9. What's next — remaining M6 blocks
+## 9. What's completed and what's next
 
-**Inventory Keeper (next block).**
+**End-of-game detection (M6 carryover — now done).**
+`is_game_won` and `is_game_over` from M4 were wired into `main.py` as part of
+closing M6. After every GM turn, `_check_end_of_game()` reads the validated
+`GameState` and returns `"lost"` (HP = 0), `"won"` (active quest completed), or
+`None` (game continues); defeat takes precedence over victory. `_print_end_of_game`
+shows the appropriate panel and exits the loop. The decision is entirely in tested
+Python — the model may narrate a dramatic fall, but whether the game actually ends
+is decided by the validated state. Five new tests in `tests/test_end_of_game.py`
+cover the four outcome cases and the precedence rule, all without an API key.
+
+**Inventory Keeper (future milestone).**
 The `add_item`, `remove_item`, and `get_inventory` tools currently live with the
 Game Master. Moving them to a dedicated Inventory Keeper agent completes the
 specialization: the GM orchestrates, the Referee arbitrates, the Lore Keeper
 syncs the narrative world, and the Inventory Keeper is the single source of truth
 for what the player carries. The GM would call the Inventory Keeper as a tool for
-any inventory read or mutation — the same agent-as-tool pattern used for both
-existing specialists.
+any inventory read or mutation — the same agent-as-tool pattern used for the
+Referee and Lore Keeper.
 
-**Critic (future block).**
-A Critic agent that reviews the GM's draft response before it reaches the player.
-This is likely a pipeline step (unconditional code-controlled review), not an
-agent-as-tool call — the Critic always runs, and if it objects, the GM revises.
-This introduces the third coordination pattern (section 3.3): a code-controlled
-sequence where the Critic's step is unconditional rather than GM-discretionary.
-
-**Handoff exploration (future block).**
+**Handoff exploration (future milestone).**
 Once all specialists exist, there will be scenarios where a full handoff is
 appropriate — for example, when the player's action is purely about inventory
 management and the Inventory Keeper can resolve the entire turn without GM
 narration. Block 3 deliberately used agent-as-tool (not handoff) for the Lore
-Keeper to preserve narration control; future blocks will explore the cases where
-handoffs are correct.
+Keeper to preserve narration control; future milestones will explore the cases
+where handoffs are correct.
 
-**Wiring win/lose detection (carryover from M5).**
-`is_game_won` and `is_game_over` from M4 are still not called after each turn in
-`main.py`. Wiring this is a small step, deferred again in M6 because the agent
-architecture was the priority.
-
-**Inter-agent testing patterns.**
+**Inter-agent testing patterns (M8).**
 A Rules Referee that returns correct rulings in isolation may behave differently
-when invoked by a Game Master with a partial or contradictory context. M6's future
-blocks will develop test patterns for agent interactions — not just contract tests
-on constants, but behavioral tests on the coordination itself. This is the deepest
+when invoked by a Game Master with a partial or contradictory context. M8 will
+develop test patterns for agent interactions — not just contract tests on
+constants, but behavioral tests on the coordination itself. This is the deepest
 QA challenge the project has not yet addressed.

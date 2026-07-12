@@ -25,7 +25,7 @@ replacing a bare roll the model interpreted at whim). The design lesson: guarant
 what MUST always happen in code (the Critic always reviews; the retry cap is fixed),
 and let agents handle what tolerates an honest gap. See the reference guide
 [docs/principios-y-patrones-de-agentes.md](docs/principios-y-patrones-de-agentes.md).
-114 deterministic tests passing without an API key.
+119 deterministic tests passing without an API key.
 
 **M5 — Session state & UX (done).** Five blocks delivering a stable, honest
 session experience: **persistence unification** (retired the M2 free-form JSON
@@ -176,7 +176,7 @@ python -m pytest                  # everything
 `pytest` is included in the `[dev]` extra installed in the Setup step above —
 no separate install needed.
 
-- **Deterministic tests** (no `llm` marker): **114 tests** across eight files, all
+- **Deterministic tests** (no `llm` marker): **119 tests** across nine files, all
   passing without an API key:
   - `test_smoke.py` — 10 tests: imports, config, provider selection, agent contract, debug flag
   - `test_dice.py` — 18 tests: dice domain logic, seeded RNG, bounds, skill checks (M6)
@@ -186,10 +186,11 @@ no separate install needed.
   - `test_rules_referee.py` — 7 tests: Rules Referee contract, skill-check + persistence (M6)
   - `test_lore_keeper.py` — 5 tests: Lore Keeper contract, GM delegation (M6)
   - `test_critic.py` — 6 tests: Critic contract, structured verdict, bounded retry (M6)
+  - `test_end_of_game.py` — 5 tests: win/lose detection wired via `_check_end_of_game` (M6)
 - **LLM tests** (`@pytest.mark.llm`): make real model calls. None exist yet;
   they arrive in Milestone 8 and stay separate from the deterministic suite.
 
-## Project structure (M5)
+## Project structure (M6)
 
 ```text
 dungeon-agents/
@@ -199,27 +200,38 @@ dungeon-agents/
   src/dungeon_agents/
     config.py            # the ONLY place env vars are read; reads DUNGEON_DEBUG (M5)
     main.py              # console loop + I/O; meta-commands: stats, inventory,
-                         # summary, new, debug, help, save, exit
+                         # summary, new, debug, help, save, exit;
+                         # _check_end_of_game / _print_end_of_game (M6 carryover)
     domain/              # pure Python, zero SDK — testable business logic
       models.py          # 5 Pydantic models: InventoryItem, Player, Quest, GameState
                          # (+ last_scene field M5), ActionResult
-      dice.py            # roll_dice(), InvalidDiceError, MIN/MAX_SIDES
+      dice.py            # roll_dice(), resolve_check() (M6), InvalidDiceError,
+                         # InvalidDifficultyError, DIFFICULTY_THRESHOLDS, MIN/MAX_SIDES
       state.py           # save_state / load_state (strict) / load_state_or_none
                          # (tolerant, M5) / clear_state (M5) + StateError
                          # (M2 free-form tools retired in M5; one validated format)
-      rules.py           # 9 pure rule functions: inventory, gold, HP, win/lose (M4)
+      rules.py           # pure rule functions: inventory, gold, HP, win/lose (M4);
+                         # can_afford() (M6)
     tools/               # thin @function_tool wrappers; one of two SDK-touching layers
-      game_tools.py      # 10 tools: roll_dice, save_game, load_game, get_inventory,
-                         # add_item, remove_item, validate_action (M4),
-                         # update_summary, set_location, set_quest (M5)
+      game_tools.py      # tools: roll_dice, save_game, load_game, get_inventory,
+                         # add_item, remove_item, check_can_afford (M6, replaces
+                         # validate_action), earn_gold, spend_gold, change_hp (M6),
+                         # skill_check (M6), update_summary, set_location, set_quest
     agents/
       game_master.py     # Game Master agent + GAME_MASTER_INSTRUCTIONS constant
+      rules_referee.py   # Rules Referee agent + RULES_REFEREE_INSTRUCTIONS (M6)
+      lore_keeper.py     # Lore Keeper agent + LORE_KEEPER_INSTRUCTIONS (M6)
+      critic.py          # Critic agent + CRITIC_INSTRUCTIONS, verdict tokens (M6)
   tests/
     test_smoke.py        # 10 tests — imports, config, provider, agent contract, debug flag
-    test_dice.py         # 12 tests — dice domain logic
+    test_dice.py         # 18 tests — dice domain logic + resolve_check (M6)
     test_state.py        # 9 tests  — validated persistence + tolerant loader + clear_state
     test_models.py       # 21 tests — Pydantic model validation
-    test_rules.py        # 29 tests — inventory, gold, HP, win/lose rules (M4)
+    test_rules.py        # 38 tests — inventory, gold, HP, win/lose rules + can_afford (M6)
+    test_rules_referee.py # 7 tests — Rules Referee contract (M6)
+    test_lore_keeper.py  # 5 tests  — Lore Keeper contract (M6)
+    test_critic.py       # 6 tests  — Critic contract, structured verdict, retry cap (M6)
+    test_end_of_game.py  # 5 tests  — win/lose detection via _check_end_of_game (M6)
 ```
 
 The structure grows one milestone at a time — files appear when their milestone

@@ -181,9 +181,14 @@ pip install -e ".[dev]"
   misleading name that delegated the decision back to the model) was replaced by
   `check_can_afford`, backed by the deterministic pure function `can_afford`, and
   bare dice were tied to consequence via `resolve_check` (roll vs a named
-  difficulty, decided in code) exposed as the `skill_check` tool. 114 deterministic
-  tests (incl. new referee/lore-keeper/critic contract tests + can_afford +
-  resolve_check), all passing without an API key. Reference doc:
+  difficulty, decided in code) exposed as the `skill_check` tool. End-of-game
+  detection wired: `_check_end_of_game()` in `main.py` reads the validated state
+  after every turn and returns "won" / "lost" / None — calling `is_game_won` /
+  `is_game_over` from M4, which were never called until now. Defeat takes
+  precedence over victory. Five new tests in `test_end_of_game.py`. 119
+  deterministic tests (incl. new referee/lore-keeper/critic contract tests +
+  can_afford + resolve_check + end-of-game), all passing without an API key.
+  Reference doc:
   `docs/principios-y-patrones-de-agentes.md` (when to use agents, when not,
   non-negotiable principles, coordination patterns).
 - M7 — Guardrails & safety constraints: not started.
