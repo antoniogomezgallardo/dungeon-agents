@@ -347,8 +347,28 @@ def _play_turn(game_master, critic, runner, conversation, debug, tool_hooks):
 
     Returns (scene, next_conversation, outcome), where outcome is "won"/"lost" or
     None. The caller shows the end-of-game panel and stops when outcome is set.
+
+    If an input guardrail trips (a prompt-injection attempt), the turn is REFUSED:
+    the model never runs, an in-character notice is shown, and (None, conversation,
+    None) is returned so the caller keeps the previous scene and state unchanged.
     """
-    result = runner.run_sync(game_master, conversation, hooks=tool_hooks)
+    from agents.exceptions import InputGuardrailTripwireTriggered
+
+    try:
+        result = runner.run_sync(game_master, conversation, hooks=tool_hooks)
+    except InputGuardrailTripwireTriggered:
+        console.print(
+            Panel(
+                "The Game Master pauses, unmoved. Your attempt to bend the rules "
+                "of reality has no effect here - describe an action your character "
+                "takes instead.",
+                title="Game Master",
+                border_style="magenta",
+            )
+        )
+        if debug.enabled:
+            console.print("[dim][debug] input guardrail tripped: prompt injection blocked[/dim]")
+        return None, conversation, None
     for _ in range(MAX_SCENE_RETRIES):
         problem = _review_scene(critic, runner, result.final_output, debug)
         if problem is None:
@@ -682,9 +702,19 @@ def run() -> None:
         # A real action: add it to the history and play a turn (GM + Critic).
         # This is the ONLY place a player action triggers scene generation.
         conversation.append({"role": "user", "content": player_input})
-        _last_scene, conversation, outcome = _play_turn(
+        scene, next_conversation, outcome = _play_turn(
             game_master, critic, Runner, conversation, debug, tool_hooks
         )
+        if scene is None:
+            # Turn refused by a guardrail (e.g. prompt injection). Drop the blocked
+            # message so it never poisons the history, then re-show the current
+            # scene so the player can pick up exactly where they were (same as a
+            # meta-command). Nothing about the game state advanced.
+            conversation.pop()
+            if _last_scene:
+                _print_scene(_last_scene)
+            continue
+        _last_scene, conversation = scene, next_conversation
         if outcome is not None:
             _print_end_of_game(outcome)
             return
