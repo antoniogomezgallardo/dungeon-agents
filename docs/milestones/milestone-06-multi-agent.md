@@ -1,7 +1,8 @@
 # Milestone 6 — Multi-Agent Architecture
 
-> **Status:** In progress — Block 1 of N complete (Game Master + Rules Referee).
-> Blocks for Inventory Keeper, Lore Keeper, and Critic remain.
+> **Status:** In progress — Blocks 1 and 2 complete (Game Master + Rules Referee,
+> persistence fix, and skill-check mechanic). Blocks for Inventory Keeper, Lore
+> Keeper, and Critic remain.
 >
 > **Theme:** Specialization + coordination produce reliability that a single
 > agent with a longer prompt never can. The model orchestrates; the code verifies.
@@ -31,10 +32,12 @@ M6 replaces the do-everything Game Master with a **team of specialist agents**:
 | Lore Keeper | Maintains session summaries and scene history (future block) |
 | Critic | Reviews GM output for consistency and tone (future block) |
 
-This document covers **Block 1**: the Game Master's transformation from a
-do-everything agent into an orchestrator, and the introduction of the Rules
-Referee as the first specialist. The remaining agents will be documented as they
-are built.
+This document covers **Blocks 1 and 2**. Block 1 introduced the Rules Referee
+and the agent-as-tool coordination pattern. Block 2 — driven by the user playing
+the game and noticing concrete failures — fixed two mechanical gaps: gold and HP
+changes were never persisted to disk, and a bare dice roll had no mechanical
+weight because the model decided what the number meant. The remaining agents will
+be documented as they are built.
 
 The `domain/` layer — rules, models, state, dice — is unchanged. Every function
 built in M1–M5 is the stable tested foundation that the multi-agent layer runs on
@@ -66,10 +69,11 @@ on it without touching the SDK or an API key. The Referee knows:
   a one-line reason.
 - Hard limit: do not narrate. That is the Game Master's job.
 
-The `build_rules_referee()` factory (`agents/rules_referee.py:62`) constructs the
-agent with exactly two tools: `roll_dice` and `check_can_afford`. It deliberately
-receives none of the narration or state-mutation tools. The capability surface
-matches the job surface.
+The `build_rules_referee()` factory (`agents/rules_referee.py:71`) constructs the
+agent with only the arbitration tools — initially `roll_dice` and
+`check_can_afford` (Block 1), expanded to six tools in Block 2 (section 2.5). It
+deliberately receives none of the narration or story-state tools. The capability
+surface matches the job surface.
 
 **Why this matters.** Giving an agent only the tools its job needs is not just
 tidiness — it is a testability decision. A Referee that cannot call `add_item` or
@@ -118,15 +122,18 @@ Two tools that the Game Master held before M6 — `roll_dice` and `validate_acti
 asks the Referee, which does it. The Referee's `check_can_afford` replaces
 `validate_action` entirely (section 2.4).
 
-### 2.3 Tool count after Block 1
+### 2.3 Tool count after Block 2
 
 | Agent | Tools |
 |-------|-------|
 | Game Master | `rules_referee` (the Referee as tool), `save_game`, `load_game`, `get_inventory`, `add_item`, `remove_item`, `update_summary`, `set_location`, `set_quest` (9 total) |
-| Rules Referee | `roll_dice`, `check_can_afford` (2 total) |
+| Rules Referee | `skill_check`, `roll_dice`, `check_can_afford`, `earn_gold`, `spend_gold`, `change_hp` (6 total) |
 
-The total tool count visible to the system is 11, but the GM sees 9 and the
-Referee sees 2. Specialization means narrowing, not growing.
+The total tool count visible to the system is 15, but the GM sees 9 and the
+Referee sees 6. Specialization means narrowing, not growing. The Referee grew
+from 2 to 6 tools in Block 2 because arbitrating an outcome now includes
+persisting its consequences — those four tools are not narration tools, they are
+the completion of the Referee's single job.
 
 ### 2.4 Design decision: `validate_action` retired, `check_can_afford` introduced
 
@@ -177,6 +184,147 @@ to numbers**; the code **decides affordability**.
 This is the same "AI orchestrates, code verifies" pattern applied one level deeper:
 now the code inside the Referee's tools — not just the GM's tools — does the
 deciding.
+
+### 2.5 Block 2 — Bug fix: gold and HP changes were never persisted
+
+This fix, like the `validate_action` retirement, was identified because the user
+played the game. The symptom: after earning a reward or taking damage in combat,
+the `stats` command showed the original values, and reloading the game reset
+everything to zero. The model was narrating changes that never touched the
+validated state on disk.
+
+The root cause was a gap in tool exposure. `earn_gold`, `spend_gold`, and
+`change_hp` existed as pure domain functions in `domain/rules.py` since Milestone
+4. They were correct and tested. But they were never wrapped as `@function_tool`
+and never given to any agent. The agent had no mechanism to call them.
+
+The consequence was the same failure mode that M5 established as the cardinal
+error: the model's narration was the only record of the gold and HP changes.
+Narration is not state. When the session ended, the changes vanished.
+
+The fix is in `tools/game_tools.py:177–216`. Three new `@function_tool` wrappers
+were added, each following the established load-modify-save pattern:
+
+```python
+@function_tool
+def earn_gold(amount: int) -> str:
+    return _apply(rules.earn_gold(_load_or_new_state(), amount))
+
+@function_tool
+def spend_gold(amount: int) -> str:
+    return _apply(rules.spend_gold(_load_or_new_state(), amount))
+
+@function_tool
+def change_hp(delta: int) -> str:
+    return _apply(rules.change_hp(_load_or_new_state(), delta))
+```
+
+`_apply` (`tools/game_tools.py:46`) calls `state.save_state(result.new_state)` on
+success. The domain function enforces the rule (HP clamped to `[0, max_hp]` by
+`max(0, min(v, cap))`; gold cannot go below 0); the wrapper persists the result.
+
+All six tools are now given to the Rules Referee in `build_rules_referee()`
+(`agents/rules_referee.py:97–104`). The Referee's instructions were updated to
+explain when to call each one and why:
+
+> "Once an action's outcome is decided, PERSIST its consequences by calling the
+> matching tool so the tracked state stays accurate: `earn_gold` / `spend_gold`
+> when the player gains or loses gold. `change_hp` when the player takes damage
+> (negative) or heals (positive). These write the change to the game state;
+> without them the change exists only in the story and is lost on reload. Only
+> persist consequences you actually ruled."
+> (`agents/rules_referee.py:51–56`)
+
+The instruction makes the reason explicit — "lost on reload" — so the model
+knows not just what to call but why the call matters. This is the pedagogic
+pattern established in `tools/game_tools.py` docstrings since M2: the docstring
+is the agent's instruction, and the instruction must explain the consequence of
+not following it.
+
+**Why the Referee, not the Game Master?** Persistence of a consequence is part of
+completing a ruling. If the Referee decides "the player takes 6 damage," it
+should call `change_hp(-6)` before returning its verdict — the ruling is not
+complete until its effect is on disk. Giving these tools to the GM would split
+the judgment (Referee) from the write (GM), which is a coordination hazard: the
+GM might narrate a different number than the Referee ruled, or forget to call
+the tool entirely. Keeping consequence persistence inside the Referee closes the
+loop atomically within the arbitration step.
+
+### 2.6 Block 2 — Mechanic fix: dice tied to a deterministic consequence
+
+The second fix was also found by the user playing the game. The symptom was
+subtle: dice were being rolled, but they had no mechanical effect. A roll of 14
+and a roll of 3 on the same task produced the same story outcome — whatever the
+model decided to narrate. The die was theater, not a game mechanic.
+
+The root cause was that `roll_dice` returned a raw integer. The model received
+"Rolled a 9 on a 20-sided die" as a tool result and was then free to interpret
+that 9 as success or failure based on its next prediction. The code produced a
+number; the model produced the consequence. That is the wrong division of labor.
+
+The fix is `resolve_check` in `domain/dice.py:102–130` and its `skill_check`
+wrapper in `tools/game_tools.py:219–241`.
+
+`resolve_check` rolls `1d20` and **compares the result against a named difficulty
+threshold in Python**, returning a `CheckResult` with an unambiguous `success:
+bool` field. The model cannot interpret the verdict — it reads "SUCCESS" or
+"FAILURE" from the tool result string produced by `skill_check`:
+
+```python
+verdict = "SUCCESS" if result.success else "FAILURE"
+return (
+    f"{verdict}: rolled {result.roll} on 1d20 vs {result.difficulty} "
+    f"(needs {result.threshold}+)."
+)
+```
+
+(`tools/game_tools.py:237–241`)
+
+The five named difficulty levels (`domain/dice.py:67–73`) and their thresholds
+are:
+
+| Level | Minimum d20 roll needed |
+|-------|------------------------|
+| `trivial` | 3 |
+| `easy` | 5 |
+| `moderate` | 10 |
+| `hard` | 15 |
+| `very_hard` | 18 |
+
+**Design decision: named levels, not free integers.**
+
+Three alternatives were considered:
+
+1. **Named difficulty levels (chosen).** The Referee passes a word ("moderate");
+   the code maps it to a threshold and compares. The model judges *how hard* the
+   action is (a subjective, context-sensitive question — exactly what a language
+   model is well-suited to answer). The code decides *whether it succeeds*
+   (a deterministic comparison — exactly what Python does reliably). The set of
+   valid difficulty names is closed; an unknown name raises
+   `InvalidDifficultyError` immediately (`domain/dice.py:118–123`), so the model
+   cannot invent a level.
+
+2. **Free integer threshold (rejected).** Passing a raw integer threshold (e.g.
+   `threshold=12`) would give the model unconstrained influence over the
+   difficulty, making the mechanic effectively probabilistic again — the model
+   could always set `threshold=1` for a guaranteed success. Named levels bound
+   the model's authority to the vocabulary the designers chose.
+
+3. **Fixed single difficulty (rejected).** A single global threshold loses all
+   mechanical texture: a "trivial" task and a "very hard" task feel identical.
+   Named levels let the Referee make a meaningful judgment about the fiction
+   without controlling the arithmetic.
+
+The principle is the same as for `check_can_afford`: the model's role is
+translation and judgment (what is this action, how hard is it?); the code's role
+is the binary decision (did it succeed?). The model cannot override a failed
+roll by claiming it would have succeeded. The roll is the record; `success:
+bool` is the verdict; narration follows from both.
+
+`resolve_check` is fully testable with a seeded `rng` parameter
+(`domain/dice.py:103`), following the same injection pattern as `roll_dice`.
+Given the same seed and difficulty, the outcome is always identical —
+reproducibility under test, real randomness in play.
 
 ---
 
@@ -375,6 +523,31 @@ This maps directly to integration testing: the contract between two components
 should be explicit and typed. A component that accepts `dict[str, Any]` is harder
 to test and reason about than one that accepts a Pydantic model.
 
+### 4.5 A tool call is the boundary between narration and persistent fact
+
+The Block 2 persistence bug made this boundary visible in the most direct way
+possible: the user played the game, earned gold in the story, and found zero gold
+when they checked the `stats` command. The gold existed in the model's narration
+— a string in the conversation history. It did not exist in `GameState` on disk.
+
+The lesson is a sharper statement of the principle from section 4.1: it is not
+enough for the model to narrate a consequence. The consequence becomes a
+persistent fact only when a tool call writes it to validated state. Until that
+call happens, the event is fictional — accurate in the story, absent from the
+system.
+
+This is easy to miss during development because the consequence looks correct in
+the conversation output. The bug only becomes visible when the state is read back
+from disk: on reload, on a `stats` command, on a `can_afford` check. The test
+for "did this actually persist?" is always: close the session, reload, and check
+the state. In QA terms: does the assertion hold after the session boundary?
+
+The corollary for agent design is: whenever the system description says "the
+player gains/loses X," there must be a tool call that writes X to validated
+state. If the tool call is missing, the event did not happen from the system's
+point of view — regardless of what the model narrated. Audit the tool calls, not
+the narrative.
+
 ---
 
 ## 5. QA mindset in M6
@@ -382,7 +555,7 @@ to test and reason about than one that accepts a Pydantic model.
 **Contract tests over integration tests.**
 
 The most important test property in M6 is that `test_rules_referee.py` runs
-without an API key and without calling a real model. All six tests in that file
+without an API key and without calling a real model. All seven tests in that file
 (`tests/test_rules_referee.py`) assert on the module-level constants
 `RULES_REFEREE_INSTRUCTIONS` and `GAME_MASTER_INSTRUCTIONS` — the behavioral
 contracts. They verify:
@@ -390,9 +563,11 @@ contracts. They verify:
 - The Referee's instructions exist and are non-trivial.
 - The Referee's instructions forbid narration ("do not narrate" appears in the
   text).
-- The Referee's instructions require dice to come from `roll_dice`, never
-  invented.
+- The Referee's instructions require `skill_check` for uncertain outcomes, and
+  assert "cannot overrule" the result.
 - The Referee's instructions require `check_can_afford` for resource actions.
+- The Referee's instructions name `earn_gold`, `spend_gold`, and `change_hp` as
+  consequence-persistence tools, and explain why ("lost on reload").
 - The Referee's instructions contain an honest-failure clause ("cannot rule
   without X").
 - The Game Master's instructions delegate contested outcomes to `rules_referee`.
@@ -434,6 +609,24 @@ confirms that `can_afford` is a genuine dry-run. An affordability check that
 accidentally spent resources would be a serious bug that no type system catches
 automatically.
 
+**`resolve_check` tests prove the boundary between model judgment and code decision.**
+
+`tests/test_dice.py` gained six tests for `resolve_check` (now 18 dice tests
+total). Each uses a seeded `rng` to make the roll exact and deterministic. The
+test cases cover:
+
+- Success when the roll meets or exceeds the threshold (seed 5 → roll 20 → beats
+  every level).
+- Failure when the roll is below the threshold (seed 2 → roll 2 → fails "easy").
+- The `>=` boundary: a roll exactly equal to the threshold counts as success.
+- Reproducibility: same seed and difficulty always produce the same `CheckResult`.
+- Rejection of an unknown difficulty name (`InvalidDifficultyError`).
+- Case normalization: `"MODERATE"` is treated as `"moderate"`.
+
+These tests are the specification for the mechanic. If `resolve_check` ever drifts
+— if, say, someone changes `>=` to `>` and breaks the boundary case — the seeded
+tests catch it immediately without running the game.
+
 **`on_agent_start` debug output now names two agents.**
 
 The `ToolActivityHooks` in `main.py` already printed `[debug] agent X is
@@ -449,25 +642,29 @@ seam built in M5 now earns its value.
 ```bash
 # Inside an activated .venv with `pip install -e ".[dev]"` already run:
 
-# Full deterministic suite (96 tests, no API key):
+# Full deterministic suite (103 tests, no API key):
 python -m pytest -m "not llm" -q
-# Expected: 96 passed
+# Expected: 103 passed
 
-# Contract tests for the Rules Referee (6 tests):
+# Contract tests for the Rules Referee (7 tests, includes Block 2 persistence checks):
 python -m pytest tests/test_rules_referee.py -v
-# Expected: all 6 tests pass
+# Expected: all 7 tests pass
 
-# Tests for can_afford (9 new tests in test_rules.py):
+# Tests for can_afford (9 tests in test_rules.py):
 python -m pytest tests/test_rules.py -v -k "can_afford"
 # Expected: 9 tests pass
 
+# Tests for resolve_check (6 tests in test_dice.py):
+python -m pytest tests/test_dice.py -v -k "check"
+# Expected: 6 tests pass
+
 # Full per-file breakdown:
 python -m pytest tests/test_smoke.py         -q    # 10 tests
-python -m pytest tests/test_dice.py          -q    # 12 tests
+python -m pytest tests/test_dice.py          -q    # 18 tests (12 original + 6 resolve_check)
 python -m pytest tests/test_state.py         -q    # 9 tests
 python -m pytest tests/test_models.py        -q    # 21 tests
 python -m pytest tests/test_rules.py         -q    # 38 tests (29 original + 9 can_afford)
-python -m pytest tests/test_rules_referee.py -q    # 6 tests
+python -m pytest tests/test_rules_referee.py -q    # 7 tests
 ```
 
 **Verify the contract directly (no API key):**
@@ -511,6 +708,63 @@ can_afford(state, gold_cost=3)
 print(state.player.gold)  # 3 (unchanged)
 ```
 
+**Verify `resolve_check` at the REPL (no API key):**
+
+```python
+import random
+from dungeon_agents.domain.dice import resolve_check, DIFFICULTY_THRESHOLDS
+
+# 1. Inspect the thresholds — they are testable constants, not magic numbers
+print(DIFFICULTY_THRESHOLDS)
+# {'trivial': 3, 'easy': 5, 'moderate': 10, 'hard': 15, 'very_hard': 18}
+
+# 2. Reproduce an exact roll with a seeded RNG
+result = resolve_check("hard", rng=random.Random(5))
+print(result.roll, result.threshold, result.success)
+# 20 15 True  (seed 5 produces a 20 on 1d20; 20 >= 15 -> success)
+
+# 3. Confirm failure is also exact and reproducible
+result = resolve_check("easy", rng=random.Random(2))
+print(result.roll, result.threshold, result.success)
+# 2 5 False  (seed 2 produces a 2; 2 < 5 -> failure)
+
+# 4. Unknown difficulty fails loudly rather than guessing
+from dungeon_agents.domain.dice import InvalidDifficultyError
+try:
+    resolve_check("impossible")
+except InvalidDifficultyError as e:
+    print(e)  # unknown difficulty 'impossible'; expected one of: easy, hard, ...
+```
+
+**Verify persistence tools at the REPL (no API key, requires a writable data/
+directory):**
+
+```python
+from dungeon_agents.domain import state
+from dungeon_agents.domain.models import GameState, Player
+
+# Seed a fresh state with known gold and HP
+fresh = GameState(player=Player(name="Aria", hp=80, gold=10))
+state.save_state(fresh)
+
+# Apply earn_gold and confirm it persists
+from dungeon_agents.domain import rules
+result = rules.earn_gold(state.load_state_or_none(), 5)
+if result.success:
+    state.save_state(result.new_state)
+
+reloaded = state.load_state_or_none()
+print(reloaded.player.gold)   # 15
+
+# Apply change_hp (damage) and confirm clamp behavior
+result = rules.change_hp(reloaded, -90)  # more damage than current HP
+if result.success:
+    state.save_state(result.new_state)
+
+reloaded2 = state.load_state_or_none()
+print(reloaded2.player.hp)    # 0  (clamped, not negative)
+```
+
 **Live game verification (requires an API key):**
 
 ```bash
@@ -527,6 +781,19 @@ dungeon-agents
 #   [debug]   rules_referee -> DISALLOWED: the player has 0 gold, cannot spend 5. (NN ms)
 #
 # The GM then narrates the refusal in-character, around the Referee's ruling.
+#
+#   You: I try to climb the castle wall
+#
+#   [debug] agent Game Master is working...
+#   [debug] Game Master -> tool rules_referee...
+#   [debug] agent Rules Referee is working...
+#   [debug] Rules Referee -> tool skill_check(difficulty='hard')...
+#   [debug]   skill_check -> FAILURE: rolled 7 on 1d20 vs hard (needs 15+). (NN ms)
+#   [debug]   Rules Referee -> tool change_hp(delta=-4)...
+#   [debug]   change_hp -> HP changed by -4. Aria now has 76/100 HP. (NN ms)
+#   [debug]   rules_referee -> DISALLOWED: rolled 7 vs hard (needs 15+); fall deals 4 damage. (NN ms)
+#
+# The GM narrates the fall in-character. The HP change is already on disk.
 ```
 
 ---
@@ -583,6 +850,28 @@ the observable debug output. The code is correct; the model is the variable. The
 correct response to model non-compliance is an honest gap, not a fabricated
 validation.
 
+**Named difficulty levels constrain the model's authority, but not its accuracy.**
+
+`skill_check` bounds the Referee to five named levels. That prevents the model
+from choosing `threshold=1` to guarantee success. It does not prevent the Referee
+from choosing "trivial" for what the story would call "very hard" — the judgment
+call of which level to assign is still a model probability. The mitigation is the
+same as for `check_can_afford`: the Referee's instructions establish a vocabulary
+for matching level to action, and debug output makes the choice visible. A future
+improvement could add a Critic step that reviews the Referee's difficulty
+assignment for consistency with the fiction.
+
+**Persistence of consequences depends on the Referee calling the right tools.**
+
+`change_hp` and `earn_gold` / `spend_gold` are only called if the Referee's model
+decides to call them. An incomplete ruling — one that decides "the player takes 4
+damage" but does not call `change_hp(-4)` — leaves the consequence un-persisted.
+The instructions explain the consequence of not calling ("lost on reload"), which
+increases the probability of compliance. The observable debug output makes
+omissions visible. As with all instruction-driven behaviors in this project: the
+code is the specification; the model is the variable; the correct response to
+omission is a visible gap and a logged event, not a fabricated state.
+
 ---
 
 ## 8. Bridge to TestOps AI
@@ -593,7 +882,7 @@ evaluation.
 
 | Dungeon Agents (M6) | TestOps AI equivalent |
 |---------------------|----------------------|
-| Rules Referee: one narrow job, two tools | A "Result Validator" agent: one job (decide pass/fail), access only to the assertion library, no side effects |
+| Rules Referee: one narrow job, narrow tool set | A "Result Validator" agent: one job (decide pass/fail), access only to the assertion library, no side effects |
 | `check_can_afford`: code decides, model translates | A test assertion: code evaluates the condition; the agent triggers the assertion with the correct parameters |
 | `validate_action` retired for a misleading name | Any QA tool named `validate_*` that defers the decision to a model is misnamed and misdesigned — rename and rewrite |
 | GM instructs Referee; Referee may not be consulted | QA orchestrator instructs result-recording agent; agent may skip steps — design for partial compliance, not assumed compliance |
@@ -602,7 +891,11 @@ evaluation.
 | Pipeline: code-controlled sequence | Fixed evaluation pipeline: test execution → result extraction → validation → reporting, each step unconditional and code-ordered |
 | Referee's ruling is structured English | An evaluator agent's verdict should be structured and typed (JSON with `success: bool` and `reason: str`), not free prose |
 | `on_agent_start` names which agent is working | Audit log entry: which evaluation agent ran which assertion, and at what timestamp |
-| Referee cannot mutate state | A validation agent should be read-only: it asserts, does not modify. Mutation lives in a separate dedicated agent |
+| Referee cannot mutate narration state | A validation agent should be read-only: it asserts, does not modify. Mutation lives in a separate dedicated agent |
+| `earn_gold` / `change_hp`: consequence persisted by the Referee's tool call | Test result written by the recorder agent's tool call — narrating "test passed" without calling the record tool is the same bug |
+| `skill_check`: model judges difficulty; code decides outcome | Evaluation metric: model interprets test output and classifies severity; code (threshold rule) decides pass/fail — never ask the model to hold the verdict |
+| Seeded `rng` makes dice deterministic under test | Seeded or mocked randomness in evaluation logic makes QA pipelines reproducible — flaky evaluators are worse than flaky tests |
+| User played the game and found the persistence bug | Real users find the gaps that tests miss — build observability (debug mode, stats command) so gaps surface quickly during QA of the QA system |
 
 **The deepest transfer: specialization is the path to a trustworthy QA verdict.**
 
@@ -624,6 +917,23 @@ tool in a QA system named `validate_*` or `check_*` that does not perform
 deterministic validation in code is misnamed. The name makes callers trust it as a
 decision; if the decision is actually probabilistic, that trust is misplaced.
 Honest naming and honest implementation are the same discipline.
+
+**The Block 2 lesson: a tool call is the boundary between narration and record.**
+
+The persistence bug found in Block 2 is structurally identical to the most
+dangerous failure mode in a QA recording system: an agent that narrates "the test
+passed" without calling the tool that writes the result to the database. The test
+run looks complete in the conversation; the database shows no result. The next
+report either omits the test (a silent gap) or, worse, inherits the previous run's
+result (a silent false positive).
+
+The mitigation in both systems is the same: (1) the tool call is the write;
+narration without a tool call is not a write; (2) build a state-reading command
+(`stats`, or a test-results query) that reads from the validated store and makes
+the gap immediately visible; (3) use debug-mode observability to audit whether the
+tool was actually called. The session boundary — close, reload, check — is the
+test for persistence. In TestOps AI, the equivalent test is: close the agent
+session, query the database, and verify the result is there.
 
 ---
 
