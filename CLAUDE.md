@@ -159,8 +159,33 @@ pip install -e ".[dev]"
   remove_item, validate_action, update_summary, set_location, set_quest).
   81 deterministic tests (10 smoke + 12 dice + 9 state + 21 models + 29 rules),
   all passing without an API key.
-- M6 — Multi-agent (Game Master, Rules Referee, Inventory Keeper, Lore Keeper,
-  Critic): not started.
+- **M6 — Multi-agent: DONE.** The single Game Master became an *orchestrator* of a
+  team of four agents, demonstrating two coordination patterns. **Rules Referee**
+  (specialist): arbitrates contested outcomes — dice, gold, HP — wired to the GM
+  via `.as_tool()` (agent-as-tool: control returns to the GM). **Lore Keeper**
+  (specialist): keeps location/quest/`session_summary` in sync with the story,
+  also agent-as-tool; addresses M5's state-sync unreliability structurally by
+  giving world-coherence its own narrow-scoped agent. **Critic** (verifier): a
+  *review pipeline* (not agent-as-tool) orchestrated deterministically in
+  `main.py` — after the GM writes a scene, the Critic checks it against the
+  validated state, and on a contradiction the GM regenerates (self-repair loop
+  bounded by `MAX_SCENE_RETRIES=1`, an anti-loop guard in code). Structured verdict
+  (`OK` / `PROBLEM: ...`) so code decides. The Critic is the LLM-as-a-judge pattern
+  and the seed of M8's evaluation. Design asymmetry worth remembering: the Lore
+  Keeper is agent-as-tool (sync tolerates an honest "not set yet" gap) while the
+  Critic is a guaranteed pipeline step (verification must never be skipped) — code
+  guarantees what MUST always happen; agents handle what tolerates honest failure.
+  Two M6 fixes from playtesting: (a) `earn_gold`/`spend_gold`/`change_hp` existed
+  in `rules.py` since M4 but were never exposed as tools, so narrated gold/HP were
+  lost on reload — now Referee tools persist them; (b) `validate_action` (a
+  misleading name that delegated the decision back to the model) was replaced by
+  `check_can_afford`, backed by the deterministic pure function `can_afford`, and
+  bare dice were tied to consequence via `resolve_check` (roll vs a named
+  difficulty, decided in code) exposed as the `skill_check` tool. 114 deterministic
+  tests (incl. new referee/lore-keeper/critic contract tests + can_afford +
+  resolve_check), all passing without an API key. Reference doc:
+  `docs/principios-y-patrones-de-agentes.md` (when to use agents, when not,
+  non-negotiable principles, coordination patterns).
 - M7 — Guardrails & safety constraints: not started.
 - M8 — Evaluation & tests: not started.
 - M9 — Bridge to QA/TestOps AI (`docs/qa_migration_notes.md`): not started.

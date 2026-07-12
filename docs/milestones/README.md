@@ -14,7 +14,7 @@ Read them in order. Each one assumes you've read the previous.
 | M3 | [milestone-03-domain-models.md](milestone-03-domain-models.md) | ✅ Done |
 | M4 | [milestone-04-inventory-rules.md](milestone-04-inventory-rules.md) | ✅ Done |
 | M5 | [milestone-05-session-ux.md](milestone-05-session-ux.md) | ✅ Done |
-| M6 | [milestone-06-multi-agent.md](milestone-06-multi-agent.md) | 🔄 In progress |
+| M6 | [milestone-06-multi-agent.md](milestone-06-multi-agent.md) | ✅ Done |
 | M7 | *guardrails* | ⏳ Not started |
 | M8 | *evaluation* | ⏳ Not started |
 | M9 | *bridge to QA/TestOps AI* | ⏳ Not started |

@@ -7,7 +7,25 @@ A small console fantasy RPG driven by AI agents.
 > Python — patterns that will later migrate into a QA/Testing product,
 > **TestOps AI**. The RPG is the pretext; testability and clarity are the goal.
 
-## Current milestone: **M5 — Session state & UX** (done)
+## Current milestone: **M6 — Multi-agent** (done)
+
+**M6 — Multi-agent (done).** The single Game Master became an **orchestrator** of a
+team of four agents, demonstrating two coordination patterns. The **Rules Referee**
+arbitrates contested outcomes (dice, gold, HP) and the **Lore Keeper** keeps the
+tracked world (location, quest, summary) in sync with the story — both wired to the
+Game Master via `.as_tool()` (the **agent-as-tool** pattern: the GM calls them and
+control returns to it). The **Critic** is different: a **review pipeline** run
+deterministically in `main.py` — after the GM writes a scene, the Critic checks it
+against the *validated state*, and on a real contradiction the GM regenerates
+(a self-repair loop bounded by a retry cap in code, never at the model's
+discretion). Two fixes came from playtesting: gold/HP now **persist** (the M4 rule
+functions were finally exposed as tools), and dice were **tied to consequence**
+(`skill_check` rolls against a named difficulty and the *code* decides success,
+replacing a bare roll the model interpreted at whim). The design lesson: guarantee
+what MUST always happen in code (the Critic always reviews; the retry cap is fixed),
+and let agents handle what tolerates an honest gap. See the reference guide
+[docs/principios-y-patrones-de-agentes.md](docs/principios-y-patrones-de-agentes.md).
+114 deterministic tests passing without an API key.
 
 **M5 — Session state & UX (done).** Five blocks delivering a stable, honest
 session experience: **persistence unification** (retired the M2 free-form JSON
@@ -158,15 +176,18 @@ python -m pytest                  # everything
 `pytest` is included in the `[dev]` extra installed in the Setup step above —
 no separate install needed.
 
-- **Deterministic tests** (no `llm` marker): **81 tests** across five files, all
+- **Deterministic tests** (no `llm` marker): **114 tests** across eight files, all
   passing without an API key:
   - `test_smoke.py` — 10 tests: imports, config, provider selection, agent contract, debug flag
-  - `test_dice.py` — 12 tests: dice domain logic, seeded RNG, bounds
+  - `test_dice.py` — 18 tests: dice domain logic, seeded RNG, bounds, skill checks (M6)
   - `test_state.py` — 9 tests: validated persistence, tolerant loader, clear_state (M5)
   - `test_models.py` — 21 tests: Pydantic model validation and cascade
-  - `test_rules.py` — 29 tests: inventory rules, gold/HP rules, win/lose conditions
+  - `test_rules.py` — 38 tests: inventory, gold/HP, win/lose, `can_afford` (M6)
+  - `test_rules_referee.py` — 7 tests: Rules Referee contract, skill-check + persistence (M6)
+  - `test_lore_keeper.py` — 5 tests: Lore Keeper contract, GM delegation (M6)
+  - `test_critic.py` — 6 tests: Critic contract, structured verdict, bounded retry (M6)
 - **LLM tests** (`@pytest.mark.llm`): make real model calls. None exist yet;
-  they arrive in Milestone 7 and stay separate from the deterministic suite.
+  they arrive in Milestone 8 and stay separate from the deterministic suite.
 
 ## Project structure (M5)
 
@@ -218,7 +239,7 @@ document** explaining what was built and *why* — see
 3. **Pydantic domain models** (`Player`, `GameState`, `InventoryItem`, `Quest`, `ActionResult`) ✅ done
 4. **Inventory & game rules** (pure rule functions, 4 new tools, win/lose conditions) ✅ done
 5. **Session state & UX** (persistence unification, deterministic resume, stats/inventory/summary/new/debug commands, debug mode) ✅ done
-6. Multi-agent (Game Master, Rules Referee, Inventory Keeper, Lore Keeper, Critic)
+6. **Multi-agent** (Game Master orchestrator + Rules Referee, Lore Keeper, Critic; agent-as-tool + review pipeline) ✅ done
 7. Guardrails & safety constraints
 8. Evaluation & tests
 9. Bridge to QA/TestOps AI (`docs/qa_migration_notes.md`)

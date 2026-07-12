@@ -1,8 +1,8 @@
 # Milestone 6 — Multi-Agent Architecture
 
-> **Status:** In progress — Blocks 1, 2, and 3 complete (Game Master + Rules
-> Referee + Lore Keeper, persistence fix, and skill-check mechanic). Blocks for
-> Inventory Keeper and Critic remain.
+> **Status:** Done — all four agents built (Game Master + Rules Referee + Lore
+> Keeper + Critic), persistence fixed, skill-check mechanic, and review pipeline.
+> 114 deterministic tests passing without an API key.
 >
 > **Theme:** Specialization + coordination produce reliability that a single
 > agent with a longer prompt never can. The model orchestrates; the code verifies.
@@ -29,17 +29,17 @@ M6 replaces the do-everything Game Master with a **team of specialist agents**:
 | **Game Master** | Narrates the story and orchestrates the others |
 | **Rules Referee** | Arbitrates: is this action allowed? What is its outcome? |
 | **Lore Keeper** | Keeps tracked world state (location, quest, summary) in sync with the story |
-| Inventory Keeper | Tracks and reports what the player carries (future block) |
-| Critic | Reviews GM output for consistency and tone (future block) |
+| **Critic** | Reviews every GM scene for consistency with the validated state before the player sees it |
 
-This document covers **Blocks 1, 2, and 3**. Block 1 introduced the Rules
+This document covers **Blocks 1 through 4**. Block 1 introduced the Rules
 Referee and the agent-as-tool coordination pattern. Block 2 — driven by the user
 playing the game and noticing concrete failures — fixed two mechanical gaps: gold
 and HP changes were never persisted to disk, and a bare dice roll had no
 mechanical weight because the model decided what the number meant. Block 3
 introduced the Lore Keeper, the second specialist agent, which owns narrative
 world-state sync and reinforces the specialization principle with a second data
-point. The remaining agents will be documented as they are built.
+point. Block 4 introduced the Critic, the fourth and final agent — and the one
+that demonstrates a fundamentally different coordination pattern.
 
 The `domain/` layer — rules, models, state, dice — is unchanged. Every function
 built in M1–M5 is the stable tested foundation that the multi-agent layer runs on
@@ -48,7 +48,7 @@ out of agents.
 
 ---
 
-## 2. What was built — Blocks 1, 2, and 3
+## 2. What was built — Blocks 1, 2, 3, and 4
 
 ### 2.1 Block 1 — The Rules Referee: a second agent with a narrow job
 
@@ -483,6 +483,233 @@ narrative-state tools migrated to the Lore Keeper, and in exchange the Lore
 Keeper appears as one new agent-as-tool entry. The system's total tool surface
 is now 19 across three agents, but each agent sees only what its job requires.
 
+### 2.9 Block 4 — The Critic: a fourth agent and a different coordination pattern
+
+`agents/critic.py` introduces the project's fourth and final specialist agent —
+and the first one that is not wired using the agent-as-tool pattern. Its module
+docstring states the distinction directly:
+
+> "Where the Rules Referee and Lore Keeper are agent-as-tool: the Game Master
+> calls them *during* its turn. The Critic runs *after* the Game Master has
+> produced a scene, reviewing it *before* the player sees it — a review pipeline
+> (see `main.py`, which orchestrates the generate -> review -> maybe-regenerate
+> loop). The pipeline step is deterministic code, so review is GUARANTEED to
+> happen, not left to the model's discretion. A verifier that only sometimes
+> verifies is worthless — the guarantee is the point."
+> (`agents/critic.py:6–10`)
+
+In QA terms, the Critic is a **tester**: an agent whose only job is to verify
+another agent's output against a source of truth. It checks the Game Master's
+narrated scene against the validated `GameState` (passed in as hard data), not
+against its own memory or opinion. This means it can catch the narration claiming
+something the tracked state contradicts — wrong gold, wrong HP, a place the state
+says the player left. The docstring names the pattern explicitly:
+
+> "This is the LLM-as-a-judge pattern and the foundation of Milestone 8's
+> evaluation work."
+> (`agents/critic.py:17–18`)
+
+**Tool surface: read-only by design.** `build_critic()` (`agents/critic.py:70`)
+constructs the agent with a single tool: `get_inventory`. It can read the
+player's inventory to verify a scene reference, but it cannot write anything.
+There is no `add_item`, no `change_hp`, no `save_game`. The Critic inspects and
+judges; it never mutates. Giving a reviewer mutation tools would introduce the
+possibility of it accidentally changing state while checking — the same principle
+that drove the Referee's and Lore Keeper's tool restrictions.
+
+**Structured verdict: tokens, not prose.** The Critic must answer in exactly one
+of two forms, defined as module-level constants (`agents/critic.py:36–37`):
+
+```python
+CRITIC_OK = "OK"
+CRITIC_PROBLEM_PREFIX = "PROBLEM:"
+```
+
+The constants are defined alongside `CRITIC_INSTRUCTIONS` at module top, not
+inside the factory function, for the same reason all instruction constants in this
+project live at module top: the behavioral contract between the Critic and
+`main.py`'s parser must be testable without an API key. The test
+`test_critic_verdict_is_structured` (`tests/test_critic.py:34`) asserts that
+both tokens appear in the instructions — verifying the Critic is told to use them
+— without calling a live model.
+
+`CRITIC_INSTRUCTIONS` (`agents/critic.py:39`) makes the structured output
+requirement explicit to the model:
+
+> "Answer in EXACTLY one of these two forms, and nothing else:
+> - `OK` if the scene is consistent with the tracked state.
+> - `PROBLEM: <one short sentence naming the specific contradiction>` if it is not."
+
+The reason for structured tokens rather than prose is that the code — not another
+model call — must decide whether to regenerate the scene. A prose verdict would
+require another LLM to parse it. A token prefix is parseable by a string
+operation (`verdict.upper().startswith(CRITIC_PROBLEM_PREFIX)`, `main.py:229`),
+which is deterministic, free, and instantaneous.
+
+The Critic is also told what NOT to flag:
+
+> "Do NOT flag creative or narrative choices — only real contradictions with the
+> tracked state. Ambiguity or added color that does not conflict with the state is
+> fine; leave it alone."
+> (`agents/critic.py:57–59`)
+
+This boundary matters. A Critic that flags every vivid adjective or invented
+minor character would generate false positives, triggering unnecessary
+regenerations that slow the game and annoy the player. The Critic's scope is
+narrow: factual contradictions with the hard state, nothing else.
+
+### 2.10 Block 4 — The review pipeline: a new coordination pattern in main.py
+
+The Critic is not wired into `build_game_master()` as a tool. It is constructed
+separately in `main.py` and run in a deterministic pipeline after each GM turn,
+before the output reaches the player. This is the project's first **review
+pipeline** (section 3.3) — a code-controlled sequence, not a model-discretionary
+tool call.
+
+**Why a pipeline instead of agent-as-tool?**
+
+This is the most important design decision in Block 4, because it is the
+deliberate *opposite* of the choice made for the Referee and Lore Keeper.
+
+For the Referee and Lore Keeper, agent-as-tool was chosen because the GM is the
+right judge of when to consult them: a skill check only matters when the action
+is risky; world sync only matters when the world has changed. Making those calls
+conditional on the GM's judgment is correct — the alternative (mandatory pipeline
+steps for every turn) would waste a model call on turns where nothing needed
+arbitrating or syncing.
+
+For the Critic, the logic inverts. **A verifier that only sometimes verifies is
+not a verifier.** If the GM decided whether to call the Critic, it could (and
+occasionally would) skip the check on exactly the turns where its own scene
+contained an error. The value of a reviewer comes entirely from the guarantee
+that every scene passes through it. The guarantee requires deterministic code,
+not a model instruction. This is the clearest expression yet of the project's
+central principle: *what must always happen goes in code*.
+
+Contrast the two patterns explicitly:
+
+| Property | Agent-as-tool (Referee, Lore Keeper) | Review pipeline (Critic) |
+|----------|-------------------------------------|--------------------------|
+| Who decides when to run | The Game Master (model probability) | `main.py` (always, every turn) |
+| Guarantee of execution | None — depends on GM calling the tool | Deterministic — code always runs it |
+| Right for | Steps where judgment about "when" matters | Steps that must NEVER be skipped |
+| Cost | Zero on turns where not needed | One extra model call per turn |
+| Failure mode when skipped | Honest gap (stats show old value) | Would defeat the purpose entirely |
+
+The honest-gap principle applies asymmetrically here. For the Lore Keeper, a
+skipped call means `stats` shows "not set yet" — an acceptable, visible gap that
+tells the player the GM skipped the sync, and gives M8 a measurable compliance
+rate. For the Critic, a skipped call means a potentially contradictory scene
+reaches the player undetected — that is not an honest gap, it is a silent
+failure of the quality gate. The asymmetry drives the architectural difference.
+
+**The pipeline loop in main.py.** The wiring is at `main.py:365–396`:
+
+```python
+result = Runner.run_sync(game_master, conversation, hooks=tool_hooks)
+for _ in range(MAX_SCENE_RETRIES):
+    problem = _review_scene(critic, Runner, result.final_output, debug)
+    if problem is None:
+        break  # scene is consistent — show it
+    if debug.enabled:
+        console.print(f"[dim][debug] regenerating scene (Critic: {problem})[/dim]")
+    retry_input = result.to_input_list() + [
+        {
+            "role": "user",
+            "content": (
+                "A consistency check flagged your last scene: "
+                f"{problem}. Rewrite the scene so it matches the tracked "
+                "game state, keeping the same intent and choices."
+            ),
+        }
+    ]
+    result = Runner.run_sync(game_master, retry_input, hooks=tool_hooks)
+```
+
+The sequence is: generate the scene, review it, regenerate if needed, then show
+it. Every scene passes through review. If the Critic approves, the scene is
+shown. If it finds a contradiction, the problem is fed back to the GM verbatim
+and the GM rewrites — a **self-repair loop**.
+
+**`MAX_SCENE_RETRIES = 1`: the deterministic anti-loop guard.**
+
+Three risks arise from a self-repair loop:
+
+1. **Infinite loop.** If the Critic keeps finding problems (or produces false
+   positives), the game hangs indefinitely.
+2. **Latency and cost.** Each retry is a GM call plus a Critic call — at
+   minimum two model invocations per retry.
+3. **False positives from the Critic.** The Critic is a language model; it can
+   flag a scene that is actually fine. A player should not wait for an unlimited
+   number of regenerations because the Critic is overzealous.
+
+All three risks share the same mitigation: `MAX_SCENE_RETRIES = 1` (`main.py:42`),
+a plain Python integer constant. The loop runs at most once. If the regenerated
+scene also fails the Critic's check, it is shown anyway — and if debug mode is
+on, the player sees the Critic's note. The constant's comment in `main.py:39–42`
+makes the guarantee explicit:
+
+> "The limit lives in code, never at the model's discretion — an agent that keeps
+> rejecting must not hang the game."
+
+The constant is exported and tested directly in `tests/test_critic.py:56–59`:
+
+```python
+def test_retry_cap_is_bounded() -> None:
+    """The self-repair loop is bounded in code so it can never hang the turn."""
+    assert isinstance(MAX_SCENE_RETRIES, int)
+    assert MAX_SCENE_RETRIES >= 0
+```
+
+A model instruction saying "regenerate at most once" would be a suggestion. An
+`int` constant that caps the loop is a guarantee. This is the same choice that
+drove `can_afford`: the thing that must be bounded is bounded in Python, not in
+a prompt.
+
+**`_state_for_review()`: the Critic checks hard facts, not memory.**
+
+The Critic receives the tracked `GameState` as part of its input on every review
+call — not from its own context window, which could be stale, but freshly
+serialized from the validated state on disk. `_state_for_review()` (`main.py:183`)
+builds a compact, deterministic summary:
+
+```python
+def _state_for_review() -> str:
+    state = game_state.load_state_or_none()
+    if state is None:
+        return "No tracked state yet."
+    p = state.player
+    quest = state.active_quest.title if state.active_quest else "none"
+    where = state.location if state.location != "unknown" else "unset"
+    return (
+        f"HP: {p.hp}/{p.max_hp}; Gold: {p.gold}; Location: {where}; "
+        f"Quest: {quest}. {rules.get_inventory(state)}"
+    )
+```
+
+This single string gives the Critic the exact numbers from validated state: HP,
+gold, location, quest, and inventory. The Critic is checking the GM's prose
+against these hard numbers. It cannot be fooled by the GM's narration, because
+it receives the source of truth independently.
+
+`_review_scene()` (`main.py:204`) composes the review prompt from that snapshot
+plus the GM's scene, runs the Critic with `Runner.run_sync`, and parses the
+structured verdict with a string prefix check — no model call to interpret the
+verdict, just a `startswith`.
+
+**Tool count after Block 4.**
+
+| Agent | Tools | Pattern |
+|-------|-------|---------|
+| Game Master | `rules_referee` (as tool), `lore_keeper` (as tool), `save_game`, `load_game`, `get_inventory`, `add_item`, `remove_item` (7 direct + 2 agent-as-tool = 9 entries) | Orchestrator |
+| Rules Referee | `skill_check`, `roll_dice`, `check_can_afford`, `earn_gold`, `spend_gold`, `change_hp` (6 total) | Agent-as-tool specialist |
+| Lore Keeper | `set_location`, `set_quest`, `update_summary`, `get_inventory` (4 total) | Agent-as-tool specialist |
+| Critic | `get_inventory` (1 total — read-only) | Review pipeline |
+
+The Critic has the smallest tool surface of any agent in the project: one
+read-only tool. This is deliberate. Its job is to inspect; no mutation tool
+should be within reach.
+
 ---
 
 ## 3. Concepts learned — multi-agent coordination patterns
@@ -554,9 +781,12 @@ the code controls the sequence, not the model. It is more predictable than
 agent-as-tool (the sequence never changes) but less flexible (the Critic always
 runs, even on trivial turns).
 
-The future Critic agent will likely use this pattern: every GM response passes
-through a Critic review step before reaching the player. That step is
-unconditional and code-controlled — a pipeline, not a dynamic tool call.
+The Critic agent (Block 4) uses this pattern. Every GM scene passes through
+a Critic review step before reaching the player — the step is unconditional and
+code-controlled (see `main.py:365–396` and `MAX_SCENE_RETRIES`), not a dynamic
+tool call. The contrast with the Referee and Lore Keeper is intentional and
+instructive: both patterns appear in the same codebase, applied to different
+agents for different reasons (section 2.10).
 
 ### 3.4 Why agent-as-tool was chosen for Block 1 — the four reasons
 
@@ -831,15 +1061,40 @@ specialist agents: the contract is a string constant; string constants are
 testable without a model call; the test suite can prove the behavioral commitment
 without running the game.
 
-**`on_agent_start` debug output now names three agents.**
+**Critic contract tests follow the same API-key-free pattern.**
+
+`tests/test_critic.py` adds six contract tests, all running without an API key
+or a live model. They assert on `CRITIC_INSTRUCTIONS`, `CRITIC_OK`,
+`CRITIC_PROBLEM_PREFIX`, and `MAX_SCENE_RETRIES`:
+
+- The Critic's instructions exist and are non-trivial.
+- The instructions require verifying the scene against the tracked state
+  (words "verify" or "consistent" and "tracked state" must appear).
+- Both verdict tokens (`CRITIC_OK` = `"OK"` and `CRITIC_PROBLEM_PREFIX` =
+  `"PROBLEM:"`) appear in the instructions — proving the model is told to use
+  them.
+- The hard limits appear: "do not narrate" and "do not change anything" (verified
+  with whitespace normalization so a line wrap doesn't break the check).
+- The false-positive guard appears: "do not flag creative" — the Critic is
+  explicitly told to ignore narrative color.
+- `MAX_SCENE_RETRIES` is an integer and is non-negative — the self-repair loop
+  is bounded by a testable constant, not by the model.
+
+The last test is the most architecturally significant: it proves that the
+anti-loop guard is a typed Python value, not an instruction. Instructions are
+probabilistic; integers are exact. The test locks the guarantee in place.
+
+**`on_agent_start` debug output now names four agents.**
 
 The `ToolActivityHooks` in `main.py` already printed `[debug] agent X is
 working...` in M5 (when there was only one agent). In M6, debug mode shows which
 agent is active per sub-invocation: the Game Master's `on_agent_start` fires,
-then the Referee's fires when the GM calls `rules_referee`, and the Lore Keeper's
-fires when the GM calls `lore_keeper`. A turn that triggers both specialists
-produces three `[debug] agent ... is working...` lines. The observability seam
-built in M5 now covers the full three-agent system.
+then the Referee's fires when the GM calls `rules_referee`, the Lore Keeper's
+fires when the GM calls `lore_keeper`, and the Critic's fires during the review
+pipeline step after the GM's scene is produced. A turn that triggers both
+specialists and the Critic produces at least four `[debug] agent ... is
+working...` lines. The observability seam built in M5 now covers the full
+four-agent system.
 
 ---
 
@@ -848,9 +1103,9 @@ built in M5 now covers the full three-agent system.
 ```bash
 # Inside an activated .venv with `pip install -e ".[dev]"` already run:
 
-# Full deterministic suite (108 tests, no API key):
+# Full deterministic suite (114 tests, no API key):
 python -m pytest -m "not llm" -q
-# Expected: 108 passed
+# Expected: 114 passed
 
 # Contract tests for the Rules Referee (7 tests, includes Block 2 persistence checks):
 python -m pytest tests/test_rules_referee.py -v
@@ -859,6 +1114,10 @@ python -m pytest tests/test_rules_referee.py -v
 # Contract tests for the Lore Keeper (5 tests, all no-API-key):
 python -m pytest tests/test_lore_keeper.py -v
 # Expected: all 5 tests pass
+
+# Contract tests for the Critic (6 tests, all no-API-key):
+python -m pytest tests/test_critic.py -v
+# Expected: all 6 tests pass
 
 # Tests for can_afford (9 tests in test_rules.py):
 python -m pytest tests/test_rules.py -v -k "can_afford"
@@ -876,6 +1135,7 @@ python -m pytest tests/test_models.py        -q    # 21 tests
 python -m pytest tests/test_rules.py         -q    # 38 tests (29 original + 9 can_afford)
 python -m pytest tests/test_rules_referee.py -q    # 7 tests
 python -m pytest tests/test_lore_keeper.py   -q    # 5 tests
+python -m pytest tests/test_critic.py        -q    # 6 tests
 ```
 
 **Verify the contract directly (no API key):**
