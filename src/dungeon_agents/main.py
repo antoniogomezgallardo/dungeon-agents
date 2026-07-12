@@ -19,10 +19,20 @@ from rich.panel import Panel
 
 from dungeon_agents.agents.game_master import build_game_master
 from dungeon_agents.config import load_settings
+from dungeon_agents.domain import state as game_state
 
 EXIT_WORDS = {"exit", "quit"}
 HELP_WORDS = {"help", "?", "/help"}
+NEW_WORDS = {"new", "/new"}
+STATS_WORDS = {"stats", "status", "/stats"}
+INVENTORY_WORDS = {"inventory", "inv", "/inventory"}
+SUMMARY_WORDS = {"summary", "recap", "/summary"}
+DEBUG_WORDS = {"debug", "/debug"}
 OPENING_PROMPT = "Begin the adventure. Set an opening scene and offer me my first choices."
+RESUME_PROMPT = (
+    "The player is resuming a saved game. Continue the adventure naturally from "
+    "the scene just shown; do not restart or re-introduce the setting."
+)
 
 # Player-facing help. Written to set honest expectations for the current
 # milestone: the tools work, but deep mechanics (real attributes, rules, a goal)
@@ -39,10 +49,18 @@ This is a [bold]free-text[/bold] adventure. On your turn you can:
   offers. Both work - you are never limited to the listed options.
 
 [bold]Commands[/bold] (type these at any time)
-- [cyan]help[/cyan]  - show this help
-- [cyan]save[/cyan]  - ask the Game Master to save your progress
-- [cyan]load[/cyan]  - resume a previously saved game
-- [cyan]exit[/cyan]  - quit the game
+- [cyan]stats[/cyan]      - show your HP, gold, location and quest (exact, from the game state)
+- [cyan]inventory[/cyan]  - show what you're carrying
+- [cyan]summary[/cyan]    - show a recap of the story so far
+- [cyan]help[/cyan]       - show this help (then re-shows your current scene)
+- [cyan]save[/cyan]       - ask the Game Master to save your progress
+- [cyan]new[/cyan]        - discard your saved game and start a fresh adventure
+- [cyan]debug[/cyan]      - toggle debug mode (see the tools/agents at work under the hood)
+- [cyan]exit[/cyan]       - quit the game (your progress is saved as you play)
+
+Your progress is saved automatically. When you start the game with a saved
+adventure, it resumes exactly where you left off - a short recap plus the last
+scene you were on.
 
 [bold]Your character, inventory and gold[/bold]
 Your character now has real, rule-backed stats. Try things like:
@@ -77,34 +95,155 @@ def _print_scene(text: str) -> None:
     console.print(Panel(Markdown(text), title="Game Master", border_style="magenta"))
 
 
+def _print_status(*, inventory_only: bool = False) -> None:
+    """Print the player's stats and/or inventory, read from the saved state.
+
+    Deterministic on purpose: this reads the validated GameState directly rather
+    than asking the Game Master to narrate it, so the numbers are always exact
+    and consistent (never improvised by the model). If there's no save yet,
+    there's nothing to show — say so plainly.
+    """
+    from dungeon_agents.domain import rules
+
+    state = game_state.load_state_or_none()
+    if state is None:
+        console.print("[dim]No character yet - take an action to begin.[/dim]")
+        return
+
+    if not inventory_only:
+        p = state.player
+        quest = state.active_quest.title if state.active_quest else "not set yet"
+        done = " (completed)" if state.active_quest and state.active_quest.completed else ""
+        # A brand-new game starts with a neutral "unknown" location until the
+        # Game Master's first scene sets it; show that gently.
+        where = state.location if state.location != "unknown" else "not set yet"
+        lines = [
+            f"[bold]{p.name}[/bold]",
+            f"HP:    {p.hp}/{p.max_hp}",
+            f"Gold:  {p.gold}",
+            f"Where: {where}",
+            f"Quest: {quest}{done}",
+        ]
+        console.print(Panel("\n".join(lines), title="Stats", border_style="blue"))
+
+    # get_inventory returns a ready-made, deterministic summary (from M4 rules).
+    console.print(Panel(rules.get_inventory(state), title="Inventory", border_style="blue"))
+
+
+def _print_summary() -> None:
+    """Print the running story summary, read from the saved state.
+
+    Deterministic: shows the `session_summary` the Game Master has been keeping,
+    verbatim — not a freshly improvised recap. Empty early on, before anything
+    story-significant has happened.
+    """
+    state = game_state.load_state_or_none()
+    if state is None:
+        console.print("[dim]No adventure yet - take an action to begin.[/dim]")
+        return
+    text = state.session_summary or "Nothing notable has happened yet."
+    console.print(Panel(text, title="Story so far", border_style="cyan"))
+
+
+def _start_new_game() -> None:
+    """Seed and save a fresh starter GameState.
+
+    Writing the starter state to disk immediately (rather than waiting for the
+    first tool call to create it) means stats/inventory always have something to
+    show from turn 0 — no "no character yet". Reuses the tools layer's
+    `new_game_state()` so the starter hero/quest stay defined in one place.
+    """
+    from dungeon_agents.tools.game_tools import new_game_state
+
+    game_state.save_state(new_game_state())
+
+
+def _remember_last_scene(scene: str) -> None:
+    """Persist the Game Master's latest scene into the saved state (best-effort).
+
+    Stored so a resumed game can reprint the exact scene the player was on — the
+    deterministic resume from M5. Best-effort: if there's no valid save yet
+    (nothing to attach the scene to), we skip silently; the next in-game save
+    will capture state going forward.
+    """
+    current = game_state.load_state_or_none()
+    if current is None:
+        return
+    current.last_scene = scene
+    game_state.save_state(current)
+
+
+def _resume_banner(state) -> None:
+    """Print the deterministic recap + last scene when resuming a saved game."""
+    p = state.player
+    quest = state.active_quest.title if state.active_quest else "none"
+    recap_lines = [
+        f"[bold]Resuming your adventure[/bold] as [bold]{p.name}[/bold].",
+        f"Location: {state.location}  |  HP: {p.hp}/{p.max_hp}  |  Gold: {p.gold}",
+        f"Quest: {quest}",
+    ]
+    if state.session_summary:
+        recap_lines.append(f"\nSo far: {state.session_summary}")
+    console.print(Panel("\n".join(recap_lines), title="Recap", border_style="cyan"))
+    if state.last_scene:
+        # Reprint the exact scene the player left on, verbatim (deterministic).
+        _print_scene(state.last_scene)
+
+
 def _print_help() -> None:
     """Show the player-facing help panel."""
     console.print(Panel(HELP_TEXT, title="Help", border_style="yellow"))
 
 
-def _build_tool_hooks():
-    """Build run hooks that surface each tool call in the console.
+class DebugState:
+    """A tiny mutable holder for the debug flag.
+
+    Mutable (not a bool) so the in-game `debug` command can toggle it at runtime
+    and the already-built hooks see the change without rebuilding the agent.
+    """
+
+    def __init__(self, enabled: bool) -> None:
+        self.enabled = enabled
+
+
+def _build_tool_hooks(debug: DebugState):
+    """Build run hooks that surface each tool call — only when debug is on.
 
     The tools run *inside* the SDK's turn, so by default the player only sees the
-    narrated result — never the mechanic. Hooks are the SDK's official
-    observability seam: the runtime calls `on_tool_start`/`on_tool_end` around
-    each tool. We use them to print a dim line like "🎲 roll_dice → Rolled a 8…".
-    This keeps the game logic untouched (observability, not behavior change) — the
-    same audit-the-agent pattern we'll want in TestOps AI.
+    narrated result, never the mechanic. Hooks are the SDK's official
+    observability seam: the runtime calls `on_agent_start` / `on_tool_start` /
+    `on_tool_end` around the agent's work. In debug mode we print which agent is
+    acting, each tool call with its arguments, and how long it took — the "see the
+    guts" view. Off by default so normal play stays clean. This is exactly the
+    audit-the-agent observability we'll want in TestOps AI, and it scales to M6:
+    when multiple agents collaborate, on_agent_start shows which one is working.
 
     Built lazily inside a function so importing this module never requires the SDK.
     """
+    from time import perf_counter
+
     from agents import RunHooks
 
+    # Plain ASCII only: Windows' cp1252 console can't encode emoji/fancy glyphs,
+    # and a raised UnicodeEncodeError inside a hook aborts the whole tool call.
     class ToolActivityHooks(RunHooks):
-        # Plain ASCII markers on purpose: Windows' default console encoding
-        # (cp1252) can't encode emoji, and a raised UnicodeEncodeError inside a
-        # hook aborts the whole tool call. Keep observability output portable.
+        def __init__(self) -> None:
+            self._started: dict[int, float] = {}
+
+        async def on_agent_start(self, context, agent) -> None:
+            if debug.enabled:
+                console.print(f"[dim][debug] agent [bold]{agent.name}[/bold] is working…[/dim]")
+
         async def on_tool_start(self, context, agent, tool) -> None:
-            console.print(f"[dim][tool] calling [bold]{tool.name}[/bold]…[/dim]")
+            if debug.enabled:
+                self._started[id(tool)] = perf_counter()
+                console.print(f"[dim][debug] {agent.name} -> tool [bold]{tool.name}[/bold]…[/dim]")
 
         async def on_tool_end(self, context, agent, tool, result) -> None:
-            console.print(f"[dim][tool] {tool.name} -> {result}[/dim]")
+            if debug.enabled:
+                started = self._started.pop(id(tool), None)
+                took = f" ({(perf_counter() - started) * 1000:.0f} ms)" if started else ""
+                console.print(f"[dim][debug]   {tool.name} -> {result}{took}[/dim]")
 
     return ToolActivityHooks()
 
@@ -130,25 +269,43 @@ def run() -> None:
         from agents import Runner
 
         game_master = build_game_master(settings)
-        tool_hooks = _build_tool_hooks()
+        debug = DebugState(enabled=settings.debug)
+        tool_hooks = _build_tool_hooks(debug)
 
+    debug_note = "  |  debug ON" if debug.enabled else ""
     console.print(
         Panel(
             "[bold]Dungeon Agents[/bold]  -  a free-text fantasy adventure\n"
-            "Type [cyan]help[/cyan] for how to play, or [cyan]exit[/cyan] to quit.\n"
-            f"[dim]{settings.provider} - {settings.model}[/dim]",
+            "Type [cyan]help[/cyan] for how to play, [cyan]new[/cyan] to start over, "
+            "or [cyan]exit[/cyan] to quit.\n"
+            f"[dim]{settings.provider} - {settings.model}{debug_note}[/dim]",
             border_style="green",
         )
     )
     # Show the full how-to-play once up front so a new player isn't lost.
     _print_help()
 
-    # The conversation history fed into each turn. Starts with the opening prompt.
-    conversation: list = [{"role": "user", "content": OPENING_PROMPT}]
+    # If a valid save exists, resume it: show the deterministic recap + the exact
+    # last scene, and tell the model to continue rather than restart. Otherwise
+    # begin a fresh adventure — and seed a starter GameState immediately so that
+    # stats/inventory show sensible defaults from turn 0 (never "no character
+    # yet"). `_last_scene` tracks what to re-show after a meta-command so the
+    # player never loses their place.
+    saved = game_state.load_state_or_none()
+    if saved is not None:
+        _resume_banner(saved)
+        conversation: list = [{"role": "user", "content": RESUME_PROMPT}]
+        _last_scene = saved.last_scene
+    else:
+        _start_new_game()
+        conversation = [{"role": "user", "content": OPENING_PROMPT}]
+        _last_scene = ""
 
     while True:
         result = Runner.run_sync(game_master, conversation, hooks=tool_hooks)
-        _print_scene(result.final_output)
+        _last_scene = result.final_output
+        _print_scene(_last_scene)
+        _remember_last_scene(_last_scene)  # persist for a deterministic resume
         # Carry the full history forward so the next turn keeps context.
         conversation = result.to_input_list()
 
@@ -156,7 +313,7 @@ def run() -> None:
             # The label hints that free-form actions are allowed, not just the
             # numbered choices the Game Master lists.
             player_input = console.input(
-                "[bold cyan]You[/bold cyan] [dim](an action or a choice #)[/dim]: "
+                "[bold cyan]You[/bold cyan] [dim](action, choice #, or help/new/exit)[/dim]: "
             ).strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]Farewell, adventurer.[/dim]")
@@ -166,8 +323,43 @@ def run() -> None:
             console.print("[dim]Farewell, adventurer.[/dim]")
             return
         if player_input.lower() in HELP_WORDS:
-            # Help is a meta-command: show it without spending a game turn.
+            # Meta-command: show help without spending a turn, then re-show the
+            # current scene so the player can pick up exactly where they were.
             _print_help()
+            if _last_scene:
+                _print_scene(_last_scene)
+            continue
+        if player_input.lower() in NEW_WORDS:
+            # Start a fresh game: reset to a seeded starter state (so stats/
+            # inventory work right away) and reset the conversation.
+            _start_new_game()
+            _last_scene = ""
+            console.print("[dim]Starting a new adventure...[/dim]")
+            conversation = [{"role": "user", "content": OPENING_PROMPT}]
+            continue
+        if player_input.lower() in STATS_WORDS:
+            # Meta-command: show deterministic stats, then re-show the scene.
+            _print_status()
+            if _last_scene:
+                _print_scene(_last_scene)
+            continue
+        if player_input.lower() in INVENTORY_WORDS:
+            _print_status(inventory_only=True)
+            if _last_scene:
+                _print_scene(_last_scene)
+            continue
+        if player_input.lower() in SUMMARY_WORDS:
+            # Show the running story recap, then re-show the scene.
+            _print_summary()
+            if _last_scene:
+                _print_scene(_last_scene)
+            continue
+        if player_input.lower() in DEBUG_WORDS:
+            # Toggle the "see the guts" view at runtime, without a game turn.
+            debug.enabled = not debug.enabled
+            console.print(
+                f"[dim]Debug mode {'ON' if debug.enabled else 'OFF'}.[/dim]"
+            )
             continue
         if not player_input:
             continue

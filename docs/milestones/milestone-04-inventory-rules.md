@@ -612,9 +612,14 @@ production scale.
 
 ---
 
-## 8. What's next — Milestone 5: multi-agent
+## 8. What's next — Milestone 5: session state & UX (then M6: multi-agent)
 
-M4 gave the game its rules. M5 introduces its first specialist agents alongside
+> **Roadmap note (updated):** a new M5 — Session state & UX — was inserted after
+> M4 shipped. The multi-agent work described below is now **M6**. The M5 scope
+> covers save-format unification, new-game vs. load choice, resume recap, and
+> deterministic stats/inventory commands.
+
+M4 gave the game its rules. M6 introduces its first specialist agents alongside
 the Game Master.
 
 The M1–M4 design has been a single Game Master agent that does everything:

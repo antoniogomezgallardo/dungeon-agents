@@ -18,28 +18,29 @@ from __future__ import annotations
 from agents import function_tool
 
 from dungeon_agents.domain import dice, rules, state
-from dungeon_agents.domain.models import GameState, Player, Quest
+from dungeon_agents.domain.models import ActionResult, GameState, Player, Quest
+
+
+def new_game_state() -> GameState:
+    """Build a fresh starter game with a NEUTRAL, undefined setting.
+
+    Location and quest are intentionally left undefined here: the Game Master
+    improvises a unique story each game and fills them in via `set_location` /
+    `set_quest`, so the saved state matches the narration the player actually
+    sees (rather than a hard-coded template that would contradict the story).
+    """
+    return GameState(player=Player(name="Adventurer"))
 
 
 def _load_or_new_state() -> GameState:
-    """Return the current game state, creating a starter one if none is saved.
+    """Return the current game state, creating a starter one if none is valid.
 
-    The inventory/resource tools follow a load-modify-save pattern so state
-    persists between turns in `data/game_state.json` (validated by M3). If no
-    save exists yet, we seed a new game with a default hero and an opening quest
-    so there is always a valid state and a goal to complete.
+    All game tools follow a load-modify-save pattern over a single, validated
+    save format (M5 unified persistence). `load_state_or_none` tolerantly returns
+    None for a missing OR incompatible save, so an old/foreign save never crashes
+    a tool — we just start fresh instead.
     """
-    current = state.load_state()
-    if current is not None:
-        return current
-    return GameState(
-        player=Player(name="Adventurer"),
-        location="the Broken Wheel Inn",
-        active_quest=Quest(
-            title="Clear the cellar",
-            description="Deal with whatever is lurking in the inn's cellar.",
-        ),
-    )
+    return state.load_state_or_none() or new_game_state()
 
 
 def _apply(result) -> str:
@@ -73,33 +74,34 @@ def roll_dice(sides: int) -> str:
 
 
 @function_tool
-def save_game_state(state_json: str) -> str:
-    """Save the current game state so it persists between sessions.
+def save_game() -> str:
+    """Save the player's current progress so it persists between sessions.
 
-    Provide the full game state as a JSON string (for now, any valid JSON —
-    e.g. player name, hp, gold, location). The state is stored in a safe project
-    directory; you cannot choose where it is written.
-
-    Args:
-        state_json: The game state to save, as a valid JSON string.
+    Saves the game's validated state (player, inventory, gold, HP, location,
+    quest) to a safe project directory. Call this when the player asks to save.
+    You do not pass any data — the current tracked game state is saved as-is.
     """
-    try:
-        return state.save_game_state(state_json)
-    except state.StateError as exc:
-        return f"Could not save game state: {exc}"
+    current = state.load_state_or_none() or new_game_state()
+    return state.save_state(current)
 
 
 @function_tool
-def load_game_state() -> str:
-    """Load the saved game state and return it as a JSON string.
+def load_game() -> str:
+    """Resume the player's saved adventure and summarize where they left off.
 
-    Use this at the start of a session to resume a saved adventure. Returns
-    "{}" (an empty state) if there is no saved game yet.
+    Call this when the player asks to load or continue a saved game. Returns a
+    short factual summary of the saved state (or a note that no valid save
+    exists, in which case a new game begins).
     """
-    try:
-        return state.load_game_state()
-    except state.StateError as exc:
-        return f"Could not load game state: {exc}"
+    saved = state.load_state_or_none()
+    if saved is None:
+        return "No saved game found (or it was incompatible). Starting a new adventure."
+    p = saved.player
+    quest = saved.active_quest.title if saved.active_quest else "none"
+    return (
+        f"Resumed. {p.name} is at {saved.location} with {p.hp}/{p.max_hp} HP and "
+        f"{p.gold} gold. Active quest: {quest}."
+    )
 
 
 # --- Milestone 4: inventory & rule tools -------------------------------------
@@ -163,3 +165,61 @@ def validate_action(action: str) -> str:
         f"Player has {game.player.gold} gold and {game.player.hp} HP. {summary}\n"
         f"Judge whether this action is possible with those resources: {action}"
     )
+
+
+@function_tool
+def update_summary(summary: str) -> str:
+    """Record a concise running summary of the adventure so far.
+
+    Call this after story-significant moments — accepting or completing a quest,
+    reaching a new place, meeting a key character, a major win or loss — to keep a
+    short recap of the important beats. The summary is shown to the player when
+    they resume a saved game or ask to see it, so write it as a brief factual
+    recap of what has happened (2-4 sentences), not a to-do list. Replace the
+    previous summary with an updated version each time.
+
+    Args:
+        summary: The updated recap of the adventure so far.
+    """
+    game = _load_or_new_state()
+    game.session_summary = summary.strip()
+    return _apply(ActionResult(success=True, message="Summary updated.", new_state=game))
+
+
+@function_tool
+def set_location(location: str) -> str:
+    """Set the player's current location to match your narration.
+
+    Call this whenever you place the player somewhere or they travel — including
+    the very first scene — so the tracked state matches the story the player
+    sees. Use a short place name (e.g. "the Whispering Forest", "Karth's docks").
+
+    Args:
+        location: The player's current location, as a short name.
+    """
+    location = location.strip()
+    if not location:
+        return "A location needs a name."
+    game = _load_or_new_state()
+    game.location = location
+    return _apply(ActionResult(success=True, message=f"Location set to {location}.", new_state=game))
+
+
+@function_tool
+def set_quest(title: str, description: str = "") -> str:
+    """Set (or replace) the player's active quest to match your narration.
+
+    Call this when the player takes on their objective — including the opening
+    quest you introduce — so the tracked quest matches the story. Setting a new
+    quest replaces the previous active one.
+
+    Args:
+        title: A short quest name (e.g. "Recover the stolen relic").
+        description: What the quest asks for (optional, one sentence).
+    """
+    title = title.strip()
+    if not title:
+        return "A quest needs a title."
+    game = _load_or_new_state()
+    game.active_quest = Quest(title=title, description=description.strip())
+    return _apply(ActionResult(success=True, message=f"Quest set: {title}.", new_state=game))

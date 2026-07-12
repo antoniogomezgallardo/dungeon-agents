@@ -7,19 +7,32 @@ A small console fantasy RPG driven by AI agents.
 > Python — patterns that will later migrate into a QA/Testing product,
 > **TestOps AI**. The RPG is the pretext; testability and clarity are the goal.
 
-## Current milestone: **M4 — Inventory & game rules**
+## Current milestone: **M5 — Session state & UX** (done)
 
-Nine deterministic rule functions in `domain/rules.py` give the game its first
-enforced mechanics: **`add_item`** / **`remove_item`** (can't use an item you
-don't have), **`spend_gold`** / **`earn_gold`** (can't spend more than you carry),
-**`change_hp`** (HP clamped to `[0, max_hp]` — damage and healing both safe),
-**`complete_quest`** / **`is_game_won`** / **`is_game_over`** (win by completing
-the active quest; lose when HP hits 0). Four new agent tools (`get_inventory`,
-`add_item`, `remove_item`, `validate_action`) follow a **load-modify-save** pattern:
-load current state, apply the rule, persist the new state on success, return the
-rule's message for the GM to narrate. All rules are pure functions (no mutation,
-no SDK), so each is trivially tested in isolation. The deterministic test suite is
-now **78 tests**, all passing without an API key.
+**M5 — Session state & UX (done).** Five blocks delivering a stable, honest
+session experience: **persistence unification** (retired the M2 free-form JSON
+save tools; unified on the single validated `GameState` schema; added a tolerant
+`load_state_or_none` that discards incompatible saves instead of crashing);
+**session management** (`last_scene` field persisted verbatim for a deterministic
+resume — exact scene reprinted on startup; `new` command to start fresh);
+**state on demand** (`stats`, `inventory`, `summary` console commands that read
+validated `GameState` directly — deterministic, not AI-narrated); **debug mode**
+(`DUNGEON_DEBUG` env var + in-game `debug` toggle; enriched `RunHooks` showing
+which agent is working, tool calls, and timing — off by default, opt-in);
+**UX refinements** (state seeded at game start so stats work from turn 0;
+`update_summary` tool writes story beats to persisted state; `set_location` /
+`set_quest` tools sync tracked state to the GM's improvised story). The key
+lesson: a prompt raises the probability that the model calls a tool; tested Python
+is the only guarantee. 81 deterministic tests passing without an API key.
+
+**M4 — Inventory & game rules (done).** Nine deterministic rule functions in
+`domain/rules.py` give the game its first enforced mechanics: **`add_item`** /
+**`remove_item`** (can't use an item you don't have), **`spend_gold`** /
+**`earn_gold`** (can't spend more than you carry), **`change_hp`** (HP clamped
+to `[0, max_hp]` — damage and healing both safe), **`complete_quest`** /
+**`is_game_won`** / **`is_game_over`** (win by completing the active quest; lose
+when HP hits 0). Four new agent tools follow a **load-modify-save** pattern. 78
+deterministic tests.
 
 **M3 — Domain models (done).** Five Pydantic models (`InventoryItem`, `Player`,
 `Quest`, `GameState`, `ActionResult`) and two validated persistence functions
@@ -27,11 +40,9 @@ now **78 tests**, all passing without an API key.
 silently. 49 deterministic tests.
 
 **M2 — Deterministic tools (done).** `roll_dice` (validated, reproducible dice
-rolls from Python — never invented by the model), `save_game_state`, and
-`load_game_state` (bounded, JSON-validated persistence in `data/`). Domain layer
-(`domain/`) and tools layer (`tools/`) introduced. SDK hooks surface each tool
-call as a dim `[tool] roll_dice -> ...` line in the console. 26 deterministic
-tests.
+rolls from Python — never invented by the model), bounded JSON-validated
+persistence in `data/`. Domain layer (`domain/`) and tools layer (`tools/`)
+introduced. SDK hooks surface tool calls in debug mode. 26 deterministic tests.
 
 ## Tech stack
 
@@ -104,7 +115,28 @@ The game is **free-text**: type an action in your own words (`I search the room`
 A brief help panel appears at startup. Type `help` at any time to see it again
 (no game turn is consumed). Type `exit` or `quit` (or press Ctrl+C) to leave.
 
-Meta-commands: `help`, `save`, `load`, `exit`.
+Meta-commands (no game turn consumed):
+
+| Command | What it does |
+|---------|-------------|
+| `stats` / `status` | HP, gold, location, quest — read directly from validated state, not AI-narrated |
+| `inventory` / `inv` | What you're carrying — same source |
+| `summary` / `recap` | Running story recap the GM has been keeping |
+| `help` | How to play |
+| `save` | Ask the GM to save your progress |
+| `new` | Discard the current save and start a fresh adventure |
+| `debug` | Toggle debug mode (see tool calls and timing; see `DUNGEON_DEBUG` below) |
+| `exit` / `quit` | Quit (progress is saved as you play) |
+
+**Debug mode** surfaces what the agent does under the hood — which tools it calls,
+what they returned, and how long each took. Off by default. Enable it two ways:
+
+```bash
+# Permanently via env var (add to .env):
+DUNGEON_DEBUG=1
+
+# Or toggle at runtime by typing `debug` at the You: prompt
+```
 
 Without the API key for your selected provider, the app prints a friendly
 message and exits cleanly instead of crashing.
@@ -126,42 +158,46 @@ python -m pytest                  # everything
 `pytest` is included in the `[dev]` extra installed in the Setup step above —
 no separate install needed.
 
-- **Deterministic tests** (no `llm` marker): **78 tests** across five files, all
+- **Deterministic tests** (no `llm` marker): **81 tests** across five files, all
   passing without an API key:
-  - `test_smoke.py` — 8 tests: imports, config, provider selection, agent contract
+  - `test_smoke.py` — 10 tests: imports, config, provider selection, agent contract, debug flag
   - `test_dice.py` — 12 tests: dice domain logic, seeded RNG, bounds
-  - `test_state.py` — 9 tests: raw-JSON persistence (M2) + validated persistence (M3)
-  - `test_models.py` — 20 tests: Pydantic model validation and cascade
+  - `test_state.py` — 9 tests: validated persistence, tolerant loader, clear_state (M5)
+  - `test_models.py` — 21 tests: Pydantic model validation and cascade
   - `test_rules.py` — 29 tests: inventory rules, gold/HP rules, win/lose conditions
 - **LLM tests** (`@pytest.mark.llm`): make real model calls. None exist yet;
   they arrive in Milestone 7 and stay separate from the deterministic suite.
 
-## Project structure (M4)
+## Project structure (M5)
 
 ```text
 dungeon-agents/
   pyproject.toml
-  .env.example
+  .env.example           # includes DUNGEON_DEBUG (off by default)
   data/                  # git-ignored; holds game_state.json when saved
   src/dungeon_agents/
-    config.py            # the ONLY place env vars are read
-    main.py              # console loop + I/O
+    config.py            # the ONLY place env vars are read; reads DUNGEON_DEBUG (M5)
+    main.py              # console loop + I/O; meta-commands: stats, inventory,
+                         # summary, new, debug, help, save, exit
     domain/              # pure Python, zero SDK — testable business logic
-      models.py          # 5 Pydantic models: InventoryItem, Player, Quest, GameState, ActionResult
+      models.py          # 5 Pydantic models: InventoryItem, Player, Quest, GameState
+                         # (+ last_scene field M5), ActionResult
       dice.py            # roll_dice(), InvalidDiceError, MIN/MAX_SIDES
-      state.py           # save_game_state/load_game_state (M2 raw-JSON) +
-                         # save_state/load_state (M3 validated) + StateError
+      state.py           # save_state / load_state (strict) / load_state_or_none
+                         # (tolerant, M5) / clear_state (M5) + StateError
+                         # (M2 free-form tools retired in M5; one validated format)
       rules.py           # 9 pure rule functions: inventory, gold, HP, win/lose (M4)
     tools/               # thin @function_tool wrappers; one of two SDK-touching layers
-      game_tools.py      # 7 tools: roll_dice, save/load state (M2), get_inventory,
-                         # add_item, remove_item, validate_action (M4)
+      game_tools.py      # 10 tools: roll_dice, save_game, load_game, get_inventory,
+                         # add_item, remove_item, validate_action (M4),
+                         # update_summary, set_location, set_quest (M5)
     agents/
       game_master.py     # Game Master agent + GAME_MASTER_INSTRUCTIONS constant
   tests/
-    test_smoke.py        # 8 tests  — imports, config, provider, agent contract
+    test_smoke.py        # 10 tests — imports, config, provider, agent contract, debug flag
     test_dice.py         # 12 tests — dice domain logic
-    test_state.py        # 9 tests  — state persistence (6 M2 + 3 M3 validated)
-    test_models.py       # 20 tests — Pydantic model validation
+    test_state.py        # 9 tests  — validated persistence + tolerant loader + clear_state
+    test_models.py       # 21 tests — Pydantic model validation
     test_rules.py        # 29 tests — inventory, gold, HP, win/lose rules (M4)
 ```
 
@@ -180,8 +216,9 @@ document** explaining what was built and *why* — see
 1. **Single Game Master agent** ✅ done
 2. **Deterministic tools** (`roll_dice`, load/save state) ✅ done
 3. **Pydantic domain models** (`Player`, `GameState`, `InventoryItem`, `Quest`, `ActionResult`) ✅ done
-4. **Inventory & game rules** (pure rule functions, 4 new tools, win/lose conditions) ✅ done ← *you are here*
-5. Multi-agent (Game Master, Rules Referee, Inventory Keeper, Lore Keeper, Critic)
-6. Guardrails & safety constraints
-7. Evaluation & tests
-8. Bridge to QA/TestOps AI (`docs/qa_migration_notes.md`)
+4. **Inventory & game rules** (pure rule functions, 4 new tools, win/lose conditions) ✅ done
+5. **Session state & UX** (persistence unification, deterministic resume, stats/inventory/summary/new/debug commands, debug mode) ✅ done
+6. Multi-agent (Game Master, Rules Referee, Inventory Keeper, Lore Keeper, Critic)
+7. Guardrails & safety constraints
+8. Evaluation & tests
+9. Bridge to QA/TestOps AI (`docs/qa_migration_notes.md`)

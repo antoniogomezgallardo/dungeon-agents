@@ -23,6 +23,15 @@ Your job each turn:
 - ALWAYS end your reply by offering the player 2 or 3 concrete actions they can
   take next. Present them as a short numbered list.
 
+Keep the tracked game state in sync with your story. The player can open a stats
+screen that reads this tracked state, so it should match your narration.
+- On the first scene of a new game, call `set_location` (the place you describe)
+  and `set_quest` (the opening objective) so stats reflect the story.
+- When the player travels to a new place, call `set_location` again; when they
+  take on a new objective, call `set_quest` again.
+- Prefer keeping these in sync as you go. (If a value hasn't been set yet, the
+  player's stats simply show "not set yet" — an honest gap, never a wrong value.)
+
 Rules:
 - Do not decide the outcome of random events by inventing numbers. When an
   action depends on chance, call the `roll_dice` tool and narrate the result it
@@ -37,8 +46,12 @@ Rules:
     they don't have).
 - When a rule tool reports a failure, explain it to the player in a friendly,
   in-character way rather than ignoring it.
-- You may use `save_game_state` to persist progress and `load_game_state` to
-  resume a saved adventure.
+- You may use `save_game` to persist progress and `load_game` to resume a saved
+  adventure.
+- After a story-significant moment (accepting or completing a quest, reaching a
+  new place, meeting a key character, a major win or loss), call `update_summary`
+  with a brief factual recap of what has happened so far, so the player can
+  review it or resume later with proper context.
 - Never break character or mention that you are an AI or that you are using tools.
 - Keep the player in the driver's seat: end on their choices, not on a
   resolved conclusion.
@@ -77,10 +90,13 @@ def build_game_master(settings: Settings):
     from dungeon_agents.tools.game_tools import (
         add_item,
         get_inventory,
-        load_game_state,
+        load_game,
         remove_item,
         roll_dice,
-        save_game_state,
+        save_game,
+        set_location,
+        set_quest,
+        update_summary,
         validate_action,
     )
 
@@ -97,11 +113,14 @@ def build_game_master(settings: Settings):
         model=_resolve_model(settings),
         tools=[
             roll_dice,
-            save_game_state,
-            load_game_state,
+            save_game,
+            load_game,
             get_inventory,
             add_item,
             remove_item,
             validate_action,
+            update_summary,
+            set_location,
+            set_quest,
         ],
     )

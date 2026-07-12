@@ -108,6 +108,18 @@ def test_game_state_minimal_valid() -> None:
     assert state.location == "unknown"
     assert state.active_quest is None
     assert state.session_summary == ""
+    assert state.last_scene == ""
+
+
+def test_game_state_carries_last_scene_and_summary() -> None:
+    """last_scene and session_summary persist for deterministic resume (M5)."""
+    state = GameState(
+        player=Player(name="Aria"),
+        session_summary="Aria reached the inn and took a cellar-clearing job.",
+        last_scene="You stand at the cellar door, torch in hand. What do you do?",
+    )
+    assert "cellar-clearing" in state.session_summary
+    assert state.last_scene.startswith("You stand at the cellar door")
 
 
 def test_game_state_full_tree_valid() -> None:
