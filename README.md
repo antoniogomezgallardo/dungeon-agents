@@ -130,8 +130,9 @@ python -m dungeon_agents.main
 
 The game is **free-text**: type an action in your own words (`I search the room`,
 `I attack the goblin`) *or* a numbered choice the Game Master offers — both work.
-A brief help panel appears at startup. Type `help` at any time to see it again
-(no game turn is consumed). Type `exit` or `quit` (or press Ctrl+C) to leave.
+Startup shows an ASCII-art title and a short welcome; type `help` at any time to
+see how to play (no game turn is consumed). Type `exit` or `quit` (or press
+Ctrl+C) to leave.
 
 Meta-commands (no game turn consumed):
 

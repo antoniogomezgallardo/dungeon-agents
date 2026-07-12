@@ -395,6 +395,24 @@ def _resume_banner(state) -> None:
         _print_scene(state.last_scene)
 
 
+# ASCII-art title shown once at startup — the classic console-game splash. Kept
+# ASCII-only (no box-drawing/Unicode) so Windows' cp1252 console never chokes on
+# it, the same portability rule as the rest of our console output.
+TITLE_BANNER = r"""
+ ____                                        _                    _
+|  _ \ _   _ _ __   __ _  ___  ___  _ __    / \   __ _  ___ _ __ | |_ ___
+| | | | | | | '_ \ / _` |/ _ \/ _ \| '_ \  / _ \ / _` |/ _ \ '_ \| __/ __|
+| |_| | |_| | | | | (_| |  __/ (_) | | | |/ ___ \ (_| |  __/ | | | |_\__ \
+|____/ \__,_|_| |_|\__, |\___|\___/|_| |_/_/   \_\__, |\___|_| |_|\__|___/
+                   |___/                         |___/
+"""
+
+
+def _print_banner() -> None:
+    """Show the ASCII-art game title — the console-game splash at startup."""
+    console.print(f"[bold magenta]{TITLE_BANNER}[/bold magenta]")
+
+
 def _print_help() -> None:
     """Show the player-facing help panel."""
     console.print(Panel(HELP_TEXT, title="Help", border_style="yellow"))
@@ -480,6 +498,10 @@ def run() -> None:
         debug = DebugState(enabled=settings.debug)
         tool_hooks = _build_tool_hooks(debug)
 
+    # ASCII-art title splash, then a compact welcome panel. The full how-to-play
+    # is NOT shown automatically — the panel points to `help` for players who want
+    # it, keeping the startup clean.
+    _print_banner()
     debug_note = "  |  debug ON" if debug.enabled else ""
     console.print(
         Panel(
@@ -490,8 +512,6 @@ def run() -> None:
             border_style="green",
         )
     )
-    # Show the full how-to-play once up front so a new player isn't lost.
-    _print_help()
 
     # Startup choice. If a saved game exists, ask whether to continue it or start
     # a fresh one (starting fresh discards the current game, so we confirm first).
